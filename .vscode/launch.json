@@ -1,0 +1,45 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run: R175H (single mutation)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "main",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "args": ["--mutations", "R175H"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Run: R175H + R248W (multi-mutation)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "main",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "args": ["--mutations", "R175H,R248W"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Run: HGVS format (c.524G>A)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "main",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "args": ["--mutations", "c.524G>A"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Run: custom mutation (edit args below)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "main",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "args": ["--mutations", "R273H"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
