@@ -16,9 +16,12 @@ cell_line_status = {
              'comp_score': 0.4}
     }
 
-def get_pathway_status(cell_line, evaluation, tetramer_fraction):
+def get_pathway_status(cell_line, evaluation, tetramer_fraction, post_correction=False):
     cell_line_info = cell_line_status[cell_line]
-    structural_recovery = 1.0 - (evaluation.structural_impact if evaluation.structural_impact is not None else 0.5)
+    if post_correction:
+        structural_recovery = 1.0
+    else:
+        structural_recovery = 1.0 - (evaluation.structural_impact if evaluation.structural_impact is not None else 0.5)
     prog_score = round(tetramer_fraction * structural_recovery * cell_line_info['comp_score'], 3)
     if prog_score >= 0.25:
         prognosis = 'Favorable'

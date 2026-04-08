@@ -21,11 +21,12 @@ def score_target(dms_score, domain_penalty, cell_competency, tetramer_fraction):
         dms_score = 0.5
     return round(dms_score * (1.0 - domain_penalty) * cell_competency * tetramer_fraction, 3)
 
-def get_transcriptional_restoration(evaluation, cell_line, tetramer_fraction):
+def get_transcriptional_restoration(evaluation, cell_line, tetramer_fraction, post_correction=False):
     results = {}
+    dms = 1.0 if post_correction else evaluation.dms_score
     for target in domain_penalties:
-        domain_penalty = get_domain_penalty(target, evaluation.domain)
+        domain_penalty = 0.0 if post_correction else get_domain_penalty(target, evaluation.domain)
         cell_comp = cell_line_competency[cell_line][target]
-        score = score_target(evaluation.dms_score, domain_penalty, cell_comp, tetramer_fraction)
+        score = score_target(dms, domain_penalty, cell_comp, tetramer_fraction)
         results[target] = score
     return results

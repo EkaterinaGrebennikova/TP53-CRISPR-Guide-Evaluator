@@ -5,6 +5,7 @@ from Bio import Entrez
 from dmsscorer import get_dms_score
 from structuralscorer import get_structural_impact
 from cancerdriverscore import check_driver_overlap
+from iarcp53 import get_iarc_annotation
 
 Entrez.email = "catherine.grebennikova@gmail.com"
 
@@ -38,6 +39,13 @@ class MutationEvaluation:
     structural_impact: float = None
     driver_genes: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    iarc_transactivation: str = None
+    iarc_structure_function: str = None
+    iarc_hotspot: bool = False
+    iarc_experimental_gof: str = None
+    iarc_temperature_sensitive: str = None
+    iarc_somatic_count: int = 0
+    iarc_germline_count: int = 0
 
 def get_domain(aa_position):
     for key, value in TP53_Domains.items():
@@ -125,7 +133,11 @@ def evaluate_mutation(parsed_mutation):
     domain = get_domain(aa_pos)
     in_dbd = domain == 'DNA-binding'
     is_contact_residue = aa_pos in DNA_contact_residues
-    is_gof = aa_change in GOF_mutations
+    iarc = get_iarc_annotation(aa_change)
+    if iarc.get('found') and iarc.get('experimental_gof') is not None:
+        is_gof = True
+    else:
+        is_gof = aa_change in GOF_mutations
     clinvar_sig = get_clinvar_significance(aa_change)
     dms_score = get_dms_score(aa_change)
     s_impact = get_structural_impact(aa_pos)
@@ -148,7 +160,14 @@ def evaluate_mutation(parsed_mutation):
         functional_severity = severity,
         dms_score = dms_score,
         structural_impact = s_impact,
-        driver_genes = driver_genes
+        driver_genes = driver_genes,
+        iarc_transactivation = iarc.get('transactivation_class'),
+        iarc_structure_function = iarc.get('structure_function_class'),
+        iarc_hotspot = iarc.get('hotspot') == 'yes',
+        iarc_experimental_gof = iarc.get('experimental_gof'),
+        iarc_temperature_sensitive = iarc.get('temperature_sensitive'),
+        iarc_somatic_count = iarc.get('somatic_count', 0) or 0,
+        iarc_germline_count = iarc.get('germline_count', 0) or 0
     )
 
 def evaluate_mutations(parsed_mutations):
