@@ -1,3 +1,11 @@
+# TCGA data (regenerate via src/fetchtcgamutations.py)
+data/tcga_mutations.txt
+data/tcga_cna.txt
+data/tcga_clinical.txt
+
+# IARC p53 database (download from https://tp53.isb-cgc.org/)
+data/iarc_*.csv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
