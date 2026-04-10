@@ -24,6 +24,7 @@ from src.tcgaloader import load_clinical as tcga_load_clinical
 from src.tcgaloader import merge_patient_data as tcga_merge
 from src.tcgafrequency import get_mutation_frequencies, get_correctable_fraction
 from src.tcgamdm2 import get_mdm2_amplification_stats, get_therapy_candidates_by_cancer_type, get_nutlin_candidate_fraction
+from src.tcgaallelic import get_allelic_context, get_vaf_distribution, get_allelic_context_by_cancer_type
 
 def main():
     parser  = argparse.ArgumentParser(description="TP53 CRISPR Correction Optimizer")
@@ -69,6 +70,8 @@ def main():
         tcga_freq_lookup = {entry['aa_change']: (i + 1, entry) for i, entry in enumerate(tcga_freqs)}
         tcga_nutlin = get_nutlin_candidate_fraction(tcga_muts, tcga_cna_df)
         tcga_nutlin_lookup = {r['aa_change']: r for r in tcga_nutlin}
+        tcga_allelic = get_allelic_context(tcga_muts, tcga_cna_df)
+        tcga_allelic_by_cancer = get_allelic_context_by_cancer_type(tcga_muts, tcga_cna_df, tcga_clin)
         tcga_total = len(tcga_muts)
         tcga_available = True
     except Exception as e:
@@ -209,6 +212,9 @@ def main():
                     nc = tcga_nutlin_lookup[ev.aa_change]
                     flag = ' [strong Nutlin candidate]' if nc['strong_candidate'] else ''
                     print(f"  MDM2 co-amp rate:  {nc['mdm2_amp_count']}/{nc['total_patients']} ({nc['mdm2_amp_fraction']*100:.1f}%){flag}")
+                vaf_dist = get_vaf_distribution(tcga_muts, ev.aa_change)
+                if vaf_dist['n'] > 0:
+                    print(f"  VAF distribution:  mean={vaf_dist['mean_vaf']}, median={vaf_dist['median_vaf']}, VAF>0.7 in {vaf_dist['vaf_gt_0.7_fraction']*100:.1f}%")
             else:
                 print(f"  Not observed in TCGA PanCancer Atlas (n={tcga_total})")
 
@@ -280,6 +286,16 @@ def main():
         print(f"  HDR (indels/complex):    {correctable['hdr']['count']:>5d} ({correctable['hdr']['fraction']*100:.1f}%)")
         print(f"  Base-editable total:     {correctable['base_editable']['count']:>5d} ({correctable['base_editable']['fraction']*100:.1f}%)")
 
+        print(f"\n  --- Allelic Context (n={tcga_allelic['total_tp53_mutant_patients']} TP53-mut patients) ---")
+        states = tcga_allelic['states']
+        tot_ac = tcga_allelic['total_tp53_mutant_patients']
+        print(f"  Biallelic mutation:       {states['biallelic_mutation']:>5d} ({states['biallelic_mutation']/tot_ac*100:.1f}%)")
+        print(f"  LOH with mutation:        {states['loh_with_mutation']:>5d} ({states['loh_with_mutation']/tot_ac*100:.1f}%)")
+        print(f"  Heterozygous + gain:      {states['heterozygous_with_gain']:>5d} ({states['heterozygous_with_gain']/tot_ac*100:.1f}%)")
+        print(f"  Heterozygous CN-neutral:  {states['heterozygous_cn_neutral']:>5d} ({states['heterozygous_cn_neutral']/tot_ac*100:.1f}%)")
+        print(f"  Unknown/ambiguous:        {states['unknown']:>5d} ({states['unknown']/tot_ac*100:.1f}%)")
+        print(f"  High-confidence LOH fraction: {tcga_allelic['loh_fraction']} (conservative lower bound; see Donehower et al. 2019)")
+
         print(f"\n  --- Top Mutations by MDM2 Co-amplification (min 20 patients) ---")
         ranked = [r for r in tcga_nutlin if r['total_patients'] >= 20][:10]
         print(f"  {'Mutation':12s} {'N':>5s} {'AmpN':>5s} {'Frac':>7s}")
@@ -296,6 +312,9 @@ def main():
                 print(f"  MDM2 inhibitor candidates:  {ct['mdm2_inhibitor']:>5d}  ({ct['mdm2_inhibitor']/ct_total*100:.1f}%)")
                 print(f"  Compound therapy candidates:{ct['compound']:>5d}  ({ct['compound']/ct_total*100:.1f}%)")
                 print(f"  No p53 intervention:        {ct['none']:>5d}  ({ct['none']/ct_total*100:.1f}%)")
+                if ct_key in tcga_allelic_by_cancer:
+                    ac = tcga_allelic_by_cancer[ct_key]
+                    print(f"  LOH fraction ({ct_key}):     {ac['loh_fraction']}")
             else:
                 avail = ', '.join(sorted(therapy_by_cancer.keys()))
                 print(f"\n  [Note] Cancer type '{args.cancer_type}' not found in TCGA. Available: {avail}")
