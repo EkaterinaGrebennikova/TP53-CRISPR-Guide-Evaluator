@@ -18,6 +18,12 @@ from src.therapeuticwindow import get_therapeutic_window
 from src.compoundtherapy import get_compound_synergy
 from src.allelemodel import get_allele_status
 from src.iarcp53 import get_iarc_annotation, get_germline_status
+from src.tcgaloader import load_mutations as tcga_load_mutations
+from src.tcgaloader import load_cna as tcga_load_cna
+from src.tcgaloader import load_clinical as tcga_load_clinical
+from src.tcgaloader import merge_patient_data as tcga_merge
+from src.tcgafrequency import get_mutation_frequencies, get_correctable_fraction
+from src.tcgamdm2 import get_mdm2_amplification_stats, get_therapy_candidates_by_cancer_type, get_nutlin_candidate_fraction
 
 def main():
     parser  = argparse.ArgumentParser(description="TP53 CRISPR Correction Optimizer")
@@ -53,6 +59,21 @@ def main():
     mutations = parse_mutations(mutation_strings)
     evaluations = evaluate_mutations(mutations)
     strategies = build_strategies(mutations, evaluations)
+
+    try:
+        tcga_muts = tcga_load_mutations()
+        tcga_cna_df = tcga_load_cna()
+        tcga_clin = tcga_load_clinical()
+        tcga_merged = tcga_merge(tcga_muts, tcga_cna_df, tcga_clin)
+        tcga_freqs = get_mutation_frequencies(tcga_muts)
+        tcga_freq_lookup = {entry['aa_change']: (i + 1, entry) for i, entry in enumerate(tcga_freqs)}
+        tcga_nutlin = get_nutlin_candidate_fraction(tcga_muts, tcga_cna_df)
+        tcga_nutlin_lookup = {r['aa_change']: r for r in tcga_nutlin}
+        tcga_total = len(tcga_muts)
+        tcga_available = True
+    except Exception as e:
+        print(f"[Note] TCGA data not available: {e}")
+        tcga_available = False
 
     for s in strategies:
         m  = s["mutation"]
@@ -173,6 +194,24 @@ def main():
             else:
                 print(f"  Germline (Li-Fraumeni): No")
 
+        if tcga_available:
+            print(f"\n  --- TCGA Pan-Cancer Frequency ---")
+            if ev.aa_change in tcga_freq_lookup:
+                rank, entry = tcga_freq_lookup[ev.aa_change]
+                print(f"  TCGA frequency:    {entry['count']}/{tcga_total} ({entry['fraction']*100:.2f}%) -- rank #{rank} pan-cancer")
+                tcga_rows = tcga_merged[tcga_merged['aa_change'] == ev.aa_change]
+                if not tcga_rows.empty and 'cancer_type' in tcga_rows.columns:
+                    cancer_counts = tcga_rows['cancer_type'].dropna().value_counts().head(5)
+                    if not cancer_counts.empty:
+                        top_str = ', '.join(f"{c} ({n})" for c, n in cancer_counts.items())
+                        print(f"  Top cancer types:  {top_str}")
+                if ev.aa_change in tcga_nutlin_lookup:
+                    nc = tcga_nutlin_lookup[ev.aa_change]
+                    flag = ' [strong Nutlin candidate]' if nc['strong_candidate'] else ''
+                    print(f"  MDM2 co-amp rate:  {nc['mdm2_amp_count']}/{nc['total_patients']} ({nc['mdm2_amp_fraction']*100:.1f}%){flag}")
+            else:
+                print(f"  Not observed in TCGA PanCancer Atlas (n={tcga_total})")
+
         if args.show_all_guides:
             print(f"\n  --- All Candidate Guides ({len(s['all_guides'])}) ---")
             for ag in sorted(s['all_guides'], key=lambda x: x['score'], reverse=True):
@@ -213,6 +252,53 @@ def main():
             print(f"    {name} contribution:  +{c['gain']}  ({c['pct']}% of total gain)")
         if combined['shortfall'] > 0:
             print(f"  Shortfall to threshold:     -{combined['shortfall']}  ({'near-threshold -- combination therapy may bridge gap' if combined['shortfall'] < 0.05 else 'combination therapy required'})")
+
+    if tcga_available:
+        print(f"\n{'='*50}")
+        print(f"  TCGA THERAPY LANDSCAPE")
+        cohort_stats = get_mdm2_amplification_stats(tcga_cna_df, tcga_muts)
+        therapy_by_cancer = get_therapy_candidates_by_cancer_type(tcga_cna_df, tcga_muts, tcga_clin)
+        correctable = get_correctable_fraction(tcga_muts)
+
+        print(f"\n  --- Pan-Cancer (n={cohort_stats['total_patients']}) ---")
+        a = cohort_stats['cooccurrence']['tp53mut_and_mdm2amp']
+        b = cohort_stats['cooccurrence']['tp53mut_only']
+        c = cohort_stats['cooccurrence']['mdm2amp_only']
+        d = cohort_stats['cooccurrence']['neither']
+        n = cohort_stats['total_patients']
+        be = b
+        print(f"  Base editing candidates:    {be:>5d}  ({be/n*100:.1f}%)")
+        print(f"  MDM2 inhibitor candidates:  {c:>5d}  ({c/n*100:.1f}%)")
+        print(f"  Compound therapy candidates:{a:>5d}  ({a/n*100:.1f}%)")
+        print(f"  No p53 intervention:        {d:>5d}  ({d/n*100:.1f}%)")
+        print(f"  TP53/MDM2 mutual exclusivity: OR={cohort_stats['odds_ratio']}, Fisher p={cohort_stats['fisher_p_value']:.2e}")
+
+        print(f"\n  --- CRISPR Modality Coverage (n={correctable['total']} TP53 mutations) ---")
+        print(f"  ABE (C>T, G>A reversal): {correctable['abe']['count']:>5d} ({correctable['abe']['fraction']*100:.1f}%)")
+        print(f"  CBE (T>C, A>G reversal): {correctable['cbe']['count']:>5d} ({correctable['cbe']['fraction']*100:.1f}%)")
+        print(f"  Prime editing (other):   {correctable['pe']['count']:>5d} ({correctable['pe']['fraction']*100:.1f}%)")
+        print(f"  HDR (indels/complex):    {correctable['hdr']['count']:>5d} ({correctable['hdr']['fraction']*100:.1f}%)")
+        print(f"  Base-editable total:     {correctable['base_editable']['count']:>5d} ({correctable['base_editable']['fraction']*100:.1f}%)")
+
+        print(f"\n  --- Top Mutations by MDM2 Co-amplification (min 20 patients) ---")
+        ranked = [r for r in tcga_nutlin if r['total_patients'] >= 20][:10]
+        print(f"  {'Mutation':12s} {'N':>5s} {'AmpN':>5s} {'Frac':>7s}")
+        for r in ranked:
+            print(f"  {r['aa_change']:12s} {r['total_patients']:>5d} {r['mdm2_amp_count']:>5d} {r['mdm2_amp_fraction']*100:>6.1f}%")
+
+        if args.cancer_type and args.cancer_type.lower() != 'all':
+            ct_key = args.cancer_type.upper()
+            if ct_key in therapy_by_cancer:
+                ct = therapy_by_cancer[ct_key]
+                ct_total = sum(ct.values())
+                print(f"\n  --- {ct_key}-specific (n={ct_total}) ---")
+                print(f"  Base editing candidates:    {ct['base_editing']:>5d}  ({ct['base_editing']/ct_total*100:.1f}%)")
+                print(f"  MDM2 inhibitor candidates:  {ct['mdm2_inhibitor']:>5d}  ({ct['mdm2_inhibitor']/ct_total*100:.1f}%)")
+                print(f"  Compound therapy candidates:{ct['compound']:>5d}  ({ct['compound']/ct_total*100:.1f}%)")
+                print(f"  No p53 intervention:        {ct['none']:>5d}  ({ct['none']/ct_total*100:.1f}%)")
+            else:
+                avail = ', '.join(sorted(therapy_by_cancer.keys()))
+                print(f"\n  [Note] Cancer type '{args.cancer_type}' not found in TCGA. Available: {avail}")
 
     if args.summary:
         print_summary(strategies, args.cell_line)
@@ -320,13 +406,13 @@ def _read_vcf(path):
     lines = []
     with open(path) as f:
         for line in f:
-            if line.startswith('#'):       # skip header lines
+            if line.startswith('#'):       
                 continue
             parts = line.strip().split('\t')
             if len(parts) < 5:
                 continue
             chrom = parts[0]
-            if chrom in ('17', 'chr17'):   # only keep TP53 variants
+            if chrom in ('17', 'chr17'): 
                 lines.append(line.strip())
     return lines
 
