@@ -25,6 +25,7 @@ from src.tcgaloader import merge_patient_data as tcga_merge
 from src.tcgafrequency import get_mutation_frequencies, get_correctable_fraction
 from src.tcgamdm2 import get_mdm2_amplification_stats, get_therapy_candidates_by_cancer_type, get_nutlin_candidate_fraction
 from src.tcgaallelic import get_allelic_context, get_vaf_distribution, get_allelic_context_by_cancer_type
+from src.survivalanalysis import build_survival_df, km_tp53_mut_vs_wt, km_by_allelic_state, cox_regression, survival_by_cancer_type
 
 def main():
     parser  = argparse.ArgumentParser(description="TP53 CRISPR Correction Optimizer")
@@ -72,6 +73,11 @@ def main():
         tcga_nutlin_lookup = {r['aa_change']: r for r in tcga_nutlin}
         tcga_allelic = get_allelic_context(tcga_muts, tcga_cna_df)
         tcga_allelic_by_cancer = get_allelic_context_by_cancer_type(tcga_muts, tcga_cna_df, tcga_clin)
+        tcga_survival_df = build_survival_df(tcga_muts, tcga_cna_df, tcga_clin)
+        tcga_km_overall = km_tp53_mut_vs_wt(tcga_survival_df)
+        tcga_km_allelic = km_by_allelic_state(tcga_survival_df)
+        tcga_cox = cox_regression(tcga_survival_df)
+        tcga_surv_by_cancer = survival_by_cancer_type(tcga_survival_df)
         tcga_total = len(tcga_muts)
         tcga_available = True
     except Exception as e:
@@ -302,6 +308,45 @@ def main():
         for r in ranked:
             print(f"  {r['aa_change']:12s} {r['total_patients']:>5d} {r['mdm2_amp_count']:>5d} {r['mdm2_amp_fraction']*100:>6.1f}%")
 
+        print(f"\n  --- Survival Analysis (n={tcga_km_overall['n_mut'] + tcga_km_overall['n_wt']} patients with OS data) ---")
+        print(f"  TP53-MUT vs WT:   median OS {tcga_km_overall['median_os_mut']:.1f} vs {tcga_km_overall['median_os_wt']:.1f} months  (logrank p={tcga_km_overall['logrank_p']:.2e})")
+        print(f"  N mut / N wt:     {tcga_km_overall['n_mut']} / {tcga_km_overall['n_wt']}")
+        print(f"\n  Median OS by allelic state (vs wildtype):")
+        state_order = ['wildtype', 'heterozygous_cn_neutral', 'heterozygous_with_gain', 'loh_with_mutation', 'biallelic_mutation']
+        for state in state_order:
+            if state not in tcga_km_allelic:
+                continue
+            r = tcga_km_allelic[state]
+            med = f"{r['median_os']:.1f}" if r['median_os'] != float('inf') else 'NR'
+            p_str = f"p={r['logrank_p_vs_wt']:.2e}" if r['logrank_p_vs_wt'] is not None else '(reference)'
+            print(f"    {state:<26} n={r['n']:>5}  median OS={med:>6} mo  {p_str}")
+        print(f"\n  Cox regression (stratified by cancer type, n={tcga_cox['n_observations']}, C-index={tcga_cox['concordance']:.3f}):")
+        cox_rows = [
+            ('age', 'Age (per year)'),
+            ('sex_binary', 'Sex (Male)'),
+            ('allelic_state_heterozygous_cn_neutral', 'Het, CN-neutral'),
+            ('allelic_state_heterozygous_with_gain', 'Het + Gain'),
+            ('allelic_state_loh_with_mutation', 'LOH + Mutation'),
+            ('allelic_state_biallelic_mutation', 'Biallelic Mutation'),
+        ]
+        for key, label in cox_rows:
+            if key not in tcga_cox['summary'].index:
+                continue
+            row = tcga_cox['summary'].loc[key]
+            hr = row['exp(coef)']
+            lo = row['exp(coef) lower 95%']
+            hi = row['exp(coef) upper 95%']
+            p = row['p']
+            sig = ' *' if p < 0.05 else ''
+            print(f"    {label:<22} HR={hr:.3f}  [{lo:.3f}-{hi:.3f}]  p={p:.3g}{sig}")
+        print(f"\n  TP53-MUT survival impact by cancer type (sorted by logrank p, top 10):")
+        ranked_ct = sorted(tcga_surv_by_cancer.items(), key=lambda x: x[1]['logrank_p'])[:10]
+        for ct, r in ranked_ct:
+            mm = f"{r['median_os_mut']:.1f}" if r['median_os_mut'] != float('inf') else 'NR'
+            mw = f"{r['median_os_wt']:.1f}" if r['median_os_wt'] != float('inf') else 'NR'
+            sig = ' *' if r['logrank_p'] < 0.05 else ''
+            print(f"    {ct:<6} n_mut={r['n_mut']:>4} n_wt={r['n_wt']:>4}  median OS mut/wt = {mm}/{mw} mo  p={r['logrank_p']:.2e}{sig}")
+
         if args.cancer_type and args.cancer_type.lower() != 'all':
             ct_key = args.cancer_type.upper()
             if ct_key in therapy_by_cancer:
@@ -315,6 +360,11 @@ def main():
                 if ct_key in tcga_allelic_by_cancer:
                     ac = tcga_allelic_by_cancer[ct_key]
                     print(f"  LOH fraction ({ct_key}):     {ac['loh_fraction']}")
+                if ct_key in tcga_surv_by_cancer:
+                    sr = tcga_surv_by_cancer[ct_key]
+                    mm = f"{sr['median_os_mut']:.1f}" if sr['median_os_mut'] != float('inf') else 'NR'
+                    mw = f"{sr['median_os_wt']:.1f}" if sr['median_os_wt'] != float('inf') else 'NR'
+                    print(f"  TP53-MUT vs WT OS:          {mm} vs {mw} mo  (logrank p={sr['logrank_p']:.2e})")
             else:
                 avail = ', '.join(sorted(therapy_by_cancer.keys()))
                 print(f"\n  [Note] Cancer type '{args.cancer_type}' not found in TCGA. Available: {avail}")
