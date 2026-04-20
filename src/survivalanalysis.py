@@ -2,7 +2,8 @@ from lifelines import KaplanMeierFitter, CoxPHFitter
 from lifelines.statistics import logrank_test
 import pandas as pd
 from tcgaloader import load_mutations, load_cna, load_clinical
-from tcgaallelic import compute_vaf, classify_allelic_state
+from tcgaallelic import compute_vaf, classify_allelic_state, load_purity, PURITY_FILE
+import os
 
 def build_survival_df(mutations_df, cna_df, clinical_df):
     df = clinical_df[['patient_id', 'cancer_type', 'os_status', 'os_months', 'age', 'sex']].copy()
@@ -14,6 +15,7 @@ def build_survival_df(mutations_df, cna_df, clinical_df):
 
     n_muts_per_patient = mutations_df.groupby('patient_id').size().to_dict()
     cna_lookup = cna_df.set_index('patient_id')['tp53_cna'].to_dict()
+    purity_lookup = load_purity() if os.path.exists(PURITY_FILE) else {}
     priority = {
         'biallelic_mutation': 4,
         'loh_with_mutation': 3,
@@ -24,7 +26,8 @@ def build_survival_df(mutations_df, cna_df, clinical_df):
     patient_state = {}
     for _, row in mutations_df.iterrows():
         pid = row['patient_id']
-        vaf = compute_vaf(row)
+        purity = purity_lookup.get(pid)
+        vaf = compute_vaf(row, purity=purity)
         tp53_cna = cna_lookup.get(pid, 0)
         n_muts = n_muts_per_patient.get(pid, 1)
         state = classify_allelic_state(vaf, tp53_cna, n_muts)

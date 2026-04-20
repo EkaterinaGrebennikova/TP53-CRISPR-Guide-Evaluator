@@ -1,8 +1,25 @@
+import os
 import pandas as pd
 from tcgaloader import load_mutations, load_cna
 import statistics
 
-def compute_vaf(row):
+DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+PURITY_FILE = os.path.join(DATA_DIR, 'tcga_absolute_purity.txt')
+
+_purity_cache = None
+
+def load_purity():
+    global _purity_cache
+    if _purity_cache is not None:
+        return _purity_cache
+    df = pd.read_csv(PURITY_FILE, sep='\t')
+    df = df[df['call status'] == 'called']
+    df['patient_id'] = df['array'].str[:12]
+    _purity_cache = dict(zip(df['patient_id'], df['purity']))
+    return _purity_cache
+
+
+def compute_vaf(row, purity=None):
     ref = row['t_ref_count']
     alt = row['t_alt_count']
     if pd.isna(ref) or pd.isna(alt):
@@ -10,9 +27,32 @@ def compute_vaf(row):
     total = alt + ref
     if total == 0:
         return None
-    return alt / total
+    raw_vaf = alt / total
+    if purity is not None and purity > 0.1:
+        return min(raw_vaf / purity, 1.0)
+    return raw_vaf
 
-def classify_allelic_state(vaf, tp53_cna, n_mutations_in_patient):
+def classify_allelic_state(vaf, tp53_cna, n_mutations_in_patient, platform='tcga'):
+    # platform='tcga': GISTIC integer CNA (-2..+2), requires VAF
+    # platform='depmap': relative copy number (~0.5-1.5), no VAF available
+    if platform == 'depmap':
+        # DepMap thresholds: relative CN centered on 1.0
+        # Relaxed to capture partial gains/losses (dataset-specific calibration)
+        loss_threshold = 0.85  # < 0.85 = loss (LOH-like)
+        gain_threshold = 1.15  # > 1.15 = gain
+        neutral_low, neutral_high = 0.95, 1.05
+        if n_mutations_in_patient >= 2:
+            return 'biallelic_mutation'
+        elif n_mutations_in_patient >= 1 and tp53_cna < loss_threshold:
+            return 'loh_with_mutation'
+        elif n_mutations_in_patient >= 1 and tp53_cna > gain_threshold:
+            return 'heterozygous_with_gain'
+        elif n_mutations_in_patient >= 1 and neutral_low <= tp53_cna <= neutral_high:
+            return 'heterozygous_cn_neutral'
+        else:
+            return 'unknown'
+
+    # TCGA (GISTIC integer) path
     if n_mutations_in_patient >= 2 and tp53_cna >= 0:
         return 'biallelic_mutation'
     elif tp53_cna <= -1 and vaf is not None and vaf > 0.7:
@@ -24,9 +64,10 @@ def classify_allelic_state(vaf, tp53_cna, n_mutations_in_patient):
     else:
         return 'unknown'
     
-def get_allelic_context(mutations_df, cna_df):
+def get_allelic_context(mutations_df, cna_df, use_purity=True):
     n_muts_per_patient = mutations_df.groupby('patient_id').size().to_dict()
     cna_lookup = cna_df.set_index('patient_id')['tp53_cna'].to_dict()
+    purity_lookup = load_purity() if use_purity and os.path.exists(PURITY_FILE) else {}
     priority = {
         'biallelic_mutation': 4,
         'loh_with_mutation': 3,
@@ -37,7 +78,8 @@ def get_allelic_context(mutations_df, cna_df):
     patient_state = {}
     for _, row in mutations_df.iterrows():
         patient_id = row['patient_id']
-        vaf = compute_vaf(row)
+        purity = purity_lookup.get(patient_id)
+        vaf = compute_vaf(row, purity=purity)
         tp53_cna = cna_lookup.get(patient_id, 0)
         n_muts = n_muts_per_patient.get(patient_id, 1)
         state = classify_allelic_state(vaf, tp53_cna, n_muts)
