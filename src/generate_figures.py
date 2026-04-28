@@ -142,7 +142,7 @@ def fig_per_cancer_forest(survival_df, min_patients=30):
     labels = [f"{r.cancer_type}  (n={r.n_mut}+{r.n_wt})" for r in df.itertuples()]
     ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=9)
-    ax.set_xlabel('Hazard Ratio (TP53-MUT vs WT)', fontsize=11)
+    ax.set_xlabel('Hazard Ratio (log scale, 95% CI)', fontsize=11)
     ax.set_title('TP53 Mutation Hazard Ratio by Cancer Type (TCGA)', fontsize=13, fontweight='bold')
     ax.set_xscale('log')
 
