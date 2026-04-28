@@ -78,7 +78,7 @@ def main():
         tcga_km_allelic = km_by_allelic_state(tcga_survival_df)
         tcga_cox = cox_regression(tcga_survival_df)
         tcga_surv_by_cancer = survival_by_cancer_type(tcga_survival_df)
-        tcga_total = len(tcga_muts)
+        tcga_total = tcga_muts['patient_id'].nunique()
         tcga_available = True
     except Exception as e:
         print(f"[Note] TCGA data not available: {e}")

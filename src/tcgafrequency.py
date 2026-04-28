@@ -1,8 +1,9 @@
 from tcgaloader import load_mutations, load_cna, load_clinical, merge_patient_data
 
 def get_mutation_frequencies(df):
-    counts = df['aa_change'].value_counts()
-    total = len(df)
+    patient_mutations = df.drop_duplicates(subset=['patient_id', 'aa_change'])
+    counts = patient_mutations['aa_change'].value_counts()
+    total = df['patient_id'].nunique()
     result = []
     for aa_change, count in counts.items():
         result.append({

@@ -97,7 +97,8 @@ def get_allelic_context(mutations_df, cna_df, use_purity=True):
 
 def get_vaf_distribution(mutations_df, aa_change):
     filtered = mutations_df[mutations_df['aa_change'] == aa_change]
-    vafs = [compute_vaf(row) for _, row in filtered.iterrows()]
+    purity_lookup = load_purity() if os.path.exists(PURITY_FILE) else {}
+    vafs = [compute_vaf(row, purity=purity_lookup.get(row['patient_id'])) for _, row in filtered.iterrows()]
     vafs = [v for v in vafs if v is not None]
     if len(vafs) == 0:
         return {'aa_change': aa_change, 'n': 0, 'mean_vaf': 0, 'median_vaf': 0, 'vaf_gt_0.7_fraction': 0}

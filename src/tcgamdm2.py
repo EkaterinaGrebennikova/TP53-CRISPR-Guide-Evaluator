@@ -106,9 +106,10 @@ def get_therapy_candidates_by_cancer_type(cna_df, mutations_df, clinical_df):
 def get_nutlin_candidate_fraction(mutations_df, cna_df):
     merged = mutations_df.merge(cna_df[['patient_id', 'mdm2_cna']], on='patient_id', how='left')
     merged['mdm2_cna'] = merged['mdm2_cna'].fillna(0)
+    merged = merged.drop_duplicates(subset=['patient_id', 'aa_change'])
     results = []
     for aa_change, group_df in merged.groupby('aa_change'):
-        total = len(group_df)
+        total = group_df['patient_id'].nunique()
         amp_count = int((group_df['mdm2_cna'] >= 2).sum())
         fraction = round(amp_count / total, 3) if total > 0 else 0
         results.append({
