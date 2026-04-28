@@ -79,7 +79,7 @@ def design_guide_pe(nt_change: NucleotideChange, cds_sequence):
                     if rtt_end > len(cds_sequence) or target - nick_pos < 0:
                         continue
                     rtt_raw = list(cds_sequence[nick_pos:rtt_end])
-                    rtt_raw[target-nick_pos] = nt_change.alt_nt
+                    rtt_raw[target-nick_pos] = nt_change.ref_nt
                     rtt = ''.join(rtt_raw)
                     pbs_raw = cds_sequence[nick_pos - pbs_length : nick_pos]
                     pbs = ''.join(complement(n) for n in reversed(pbs_raw))
