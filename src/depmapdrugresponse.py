@@ -18,7 +18,7 @@ def load_tp53_mutations():
     df = pd.read_csv(MUTATIONS_FILE, low_memory=False)
     df = df[df['HugoSymbol'] == 'TP53'].copy()
     df['aa_change'] = df['ProteinChange'].fillna('').str.replace('p.', '', n=1, regex=False)
-    return df[['ModelID', 'aa_change', 'VariantType', 'RefCount', 'AltCount']].copy()
+    return df[['ModelID', 'aa_change', 'VariantType', 'RefCount', 'AltCount', 'Pos']].copy()
 
 
 def load_tp53_cna():
@@ -54,7 +54,8 @@ def load_drug_response():
 
 
 def classify_cell_lines(mutations_df, cna_df):
-    n_muts = mutations_df.groupby('ModelID').size().to_dict()
+    dedup = mutations_df.drop_duplicates(subset=['ModelID', 'Pos'])
+    n_muts = dedup.groupby('ModelID').size().to_dict()
     cna_lookup = cna_df.set_index('ModelID')['tp53_cna'].to_dict()
 
     all_models = set(cna_lookup.keys())

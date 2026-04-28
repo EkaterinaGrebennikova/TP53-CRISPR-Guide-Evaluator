@@ -185,20 +185,6 @@ def fig_depmap_nutlin_box():
     ax.axhline(y=merged[merged['allelic_state'] == 'wildtype']['LN_IC50'].median(),
                color=STATE_COLORS['wildtype'], linestyle='--', alpha=0.5, label='WT median')
 
-    # Add significance annotation for biallelic vs WT
-    wt_ic50 = merged[merged['allelic_state'] == 'wildtype']['LN_IC50']
-    bi_ic50 = merged[merged['allelic_state'] == 'biallelic_mutation']['LN_IC50']
-    if len(wt_ic50) >= 3 and len(bi_ic50) >= 3:
-        from scipy.stats import mannwhitneyu
-        _, p = mannwhitneyu(bi_ic50, wt_ic50, alternative='two-sided')
-        # Find positions of wildtype and biallelic in plot_order
-        wt_pos = plot_order.index('wildtype') + 1
-        bi_pos = plot_order.index('biallelic_mutation') + 1
-        y_max = max(merged['LN_IC50'].max(), 8)
-        ax.plot([wt_pos, wt_pos, bi_pos, bi_pos], [y_max + 0.3, y_max + 0.5, y_max + 0.5, y_max + 0.3],
-                color='black', linewidth=1)
-        ax.text((wt_pos + bi_pos) / 2, y_max + 0.6, f'p = {p:.1e}', ha='center', fontsize=9)
-
     plt.tight_layout()
     path = os.path.join(FIGURES_DIR, 'depmap_nutlin_boxplot.png')
     fig.savefig(path, dpi=200)
