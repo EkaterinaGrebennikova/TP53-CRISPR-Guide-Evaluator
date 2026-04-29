@@ -1,9 +1,29 @@
 from lifelines import KaplanMeierFitter, CoxPHFitter
 from lifelines.statistics import logrank_test
 import pandas as pd
+import numpy as np
 from tcgaloader import load_mutations, load_cna, load_clinical
 from tcgaallelic import compute_vaf, classify_allelic_state, load_purity, PURITY_FILE
 import os
+
+
+def benjamini_hochberg(p_values):
+    """Apply BH correction to a list of p-values. Returns adjusted p-values."""
+    p = np.array(p_values)
+    n = len(p)
+    ranked = np.argsort(p)
+    adjusted = np.zeros(n)
+    for i in range(n):
+        adjusted[ranked[i]] = p[ranked[i]] * n / (np.where(ranked == ranked[i])[0][0] + 1)
+    # Enforce monotonicity (step-up)
+    sorted_idx = np.argsort(p)
+    sorted_adj = p[sorted_idx] * n / (np.arange(1, n + 1))
+    for i in range(n - 2, -1, -1):
+        sorted_adj[i] = min(sorted_adj[i], sorted_adj[i + 1])
+    sorted_adj = np.minimum(sorted_adj, 1.0)
+    result = np.zeros(n)
+    result[sorted_idx] = sorted_adj
+    return result.tolist()
 
 def build_survival_df(mutations_df, cna_df, clinical_df):
     df = clinical_df[['patient_id', 'cancer_type', 'os_status', 'os_months', 'age', 'sex']].copy()
@@ -73,6 +93,7 @@ def km_by_allelic_state(survival_df):
             'km': kmf_wt
         }
     }
+    raw_pvalues = []
     for state in states:
         subset = df[df['allelic_state'] == state]
         sub_kmf = KaplanMeierFitter()
@@ -82,12 +103,16 @@ def km_by_allelic_state(survival_df):
             event_observed_A=subset['os_event'],
             event_observed_B=wt['os_event']
         )
+        raw_pvalues.append(logrank.p_value)
         results[state] = {
             'n': len(subset),
             'median_os': sub_kmf.median_survival_time_,
             'logrank_p_vs_wt': logrank.p_value,
             'km': sub_kmf
         }
+    bh_adjusted = benjamini_hochberg(raw_pvalues)
+    for state, adj_p in zip(states, bh_adjusted):
+        results[state]['bh_adjusted_p'] = adj_p
     return results
 
 def cox_regression(survival_df):
@@ -109,12 +134,58 @@ def cox_regression(survival_df):
     cph = CoxPHFitter()
     cph.fit(df, duration_col='os_months', event_col='os_event', strata=['cancer_type'])
 
+    ph_test = None
+    try:
+        ph_test = cph.check_assumptions(df, p_value_threshold=0.05, show_plots=False)
+    except Exception:
+        pass
+
     return {
         'summary': cph.summary,
         'concordance': cph.concordance_index_,
         'n_observations': len(df),
         'model': cph,
+        'ph_test': ph_test,
     }
+
+def sensitivity_analysis(survival_df):
+    """Rerun Cox regression with unknowns reassigned to test robustness."""
+    allelic_covariates = [
+        'allelic_state_heterozygous_cn_neutral',
+        'allelic_state_heterozygous_with_gain',
+        'allelic_state_loh_with_mutation',
+        'allelic_state_biallelic_mutation',
+    ]
+    scenarios = {
+        'baseline': survival_df,
+    }
+    # Worst case: unknowns become wildtype (dilutes reference group)
+    sdf_wt = survival_df.copy()
+    sdf_wt['allelic_state'] = sdf_wt['allelic_state'].replace('unknown', 'wildtype')
+    scenarios['unknowns_as_wildtype'] = sdf_wt
+
+    # Best case: unknowns become LOH (inflates LOH group)
+    sdf_loh = survival_df.copy()
+    sdf_loh['allelic_state'] = sdf_loh['allelic_state'].replace('unknown', 'loh_with_mutation')
+    scenarios['unknowns_as_loh'] = sdf_loh
+
+    results = {}
+    for name, sdf in scenarios.items():
+        cox = cox_regression(sdf)
+        hrs = {}
+        for cov in allelic_covariates:
+            state = cov.replace('allelic_state_', '')
+            hrs[state] = {
+                'hr': cox['summary'].loc[cov, 'exp(coef)'],
+                'p': cox['summary'].loc[cov, 'p'],
+            }
+        results[name] = {
+            'covariates': hrs,
+            'n_observations': cox['n_observations'],
+            'concordance': cox['concordance'],
+        }
+    return results
+
 
 def survival_by_cancer_type(survival_df, min_patients = 30):
     results = {}
