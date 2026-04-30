@@ -17,13 +17,13 @@ EFFICIENCY_NOTES = {
     ('ABE',  'MCF7'):   ('RNP electroporation', 'Lipofection',
                          '40-60% editing efficiency typical',
                          '20-40% editing efficiency typical — low transfectability'),
-    ('PE',   'HCT116'): ('Plasmid transfection', 'Lentiviral',
+    ('Prime Editing',   'HCT116'): ('Plasmid transfection', 'Lentiviral',
                          '30-50% pegRNA editing efficiency typical',
                          '50-70% editing efficiency typical'),
-    ('PE',   'U2OS'):   ('Plasmid transfection', 'Lentiviral',
+    ('Prime Editing',   'U2OS'):   ('Plasmid transfection', 'Lentiviral',
                          '40-60% pegRNA editing efficiency typical',
                          '50-70% editing efficiency typical'),
-    ('PE',   'MCF7'):   ('Lentiviral', 'None',
+    ('Prime Editing',   'MCF7'):   ('Lentiviral', 'None',
                          '50-70% editing efficiency typical — recommended for low-transfectability lines',
                          'N/A'),
     ('HDR',  'HCT116'): ('RNP + ssODN electroporation', 'AAV donor',
@@ -41,7 +41,7 @@ def recommend_delivery(modality, cell_line):
     entry = EFFICIENCY_NOTES.get((modality, cell_line))
     if entry:
         primary, secondary, primary_eff, secondary_eff = entry
-        note = 'pegRNA too large for efficient RNP' if modality == 'PE' else \
+        note = 'pegRNA too large for efficient RNP' if modality == 'Prime Editing' else \
                'ssODN delivered alongside RNP'      if modality == 'HDR' else \
                'Minimizes off-target vs plasmid'
     else:

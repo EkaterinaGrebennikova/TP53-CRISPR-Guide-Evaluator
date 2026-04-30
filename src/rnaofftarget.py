@@ -1,6 +1,6 @@
 def score_rna_offtarget(spacer, modality):
     total = 0
-    if modality == 'PE' or modality == 'HDR':
+    if modality == 'Prime Editing' or modality == 'HDR':
         return 1.0
     elif modality == 'ABE':
         for i in range(len(spacer)-1):
