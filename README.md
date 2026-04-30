@@ -18,7 +18,7 @@ The tool performs three main functions:
 
 ```bash
 python main.py -m R175H --cell-line HCT116 --zygosity heterozygous
-python main.py -m R175H,R248W --cell-line U2OS --zygosity loh --cancer-type breast
+python main.py -m R175H,R248W --cell-line U2OS --zygosity loh --cancer-type BRCA
 python main.py --vcf patient.vcf --cell-line MCF7 --summary
 ```
 
