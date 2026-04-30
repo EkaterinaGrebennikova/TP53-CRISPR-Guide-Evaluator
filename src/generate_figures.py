@@ -236,6 +236,64 @@ def fig_msk_km():
     print(f"  Saved {path}")
 
 
+def fig_cox_forest(survival_df):
+    """Fig 4: Forest plot — Cox regression covariates (stratified by cancer type)."""
+    from survivalanalysis import cox_regression
+    cox = cox_regression(survival_df)
+    summary = cox['summary']
+
+    covariates = [
+        ('age', 'Age (per year)'),
+        ('sex_binary', 'Sex (Male vs Female)'),
+        ('allelic_state_heterozygous_cn_neutral', 'Het CN-neutral'),
+        ('allelic_state_heterozygous_with_gain', 'Het + Gain'),
+        ('allelic_state_loh_with_mutation', 'LOH + Mutation'),
+        ('allelic_state_biallelic_mutation', 'Biallelic Mutation'),
+    ]
+
+    records = []
+    for key, label in covariates:
+        if key not in summary.index:
+            continue
+        row = summary.loc[key]
+        records.append({
+            'label': label,
+            'hr': row['exp(coef)'],
+            'ci_low': row['exp(coef) lower 95%'],
+            'ci_high': row['exp(coef) upper 95%'],
+            'p': row['p'],
+        })
+
+    df = pd.DataFrame(records)
+
+    fig, ax = plt.subplots(figsize=(10, max(6, len(df) * 0.8)))
+    y = np.arange(len(df))
+
+    for i, row in enumerate(df.itertuples()):
+        color = '#D32F2F' if row.p < 0.05 else '#757575'
+        ax.plot([row.ci_low, row.ci_high], [i, i], color=color, linewidth=2.5, zorder=2)
+        ax.plot(row.hr, i, 'o', color=color, markersize=9, zorder=3)
+        hr_str = f"HR={row.hr:.2f}  p={row.p:.2e}" if row.p < 0.01 else f"HR={row.hr:.2f}  p={row.p:.3f}"
+        ax.text(row.ci_high + 0.02, i, hr_str, va='center', fontsize=9, color=color)
+
+    ax.axvline(x=1.0, color='black', linestyle='--', linewidth=1, zorder=1)
+    ax.set_yticks(y)
+    ax.set_yticklabels(df['label'], fontsize=10)
+    ax.set_xlabel('Hazard Ratio (95% CI)', fontsize=11)
+    ax.set_title(f'Cox Regression (stratified by cancer type)\nN={cox["n_observations"]}, C-index={cox["concordance"]:.3f}',
+                 fontsize=13, fontweight='bold')
+
+    sig_patch = mpatches.Patch(color='#D32F2F', label='p < 0.05')
+    ns_patch = mpatches.Patch(color='#757575', label='p >= 0.05')
+    ax.legend(handles=[sig_patch, ns_patch], loc='lower right', fontsize=9)
+
+    plt.tight_layout()
+    path = os.path.join(FIGURES_DIR, 'cox_forest_plot.png')
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+    print(f"  Saved {path}")
+
+
 if __name__ == '__main__':
     print("Loading TCGA data...")
     mutations = load_mutations()
@@ -246,7 +304,10 @@ if __name__ == '__main__':
     print("\nGenerating Fig 1: Allelic state by cancer type...")
     fig_allelic_bar_by_cancer(mutations, cna, clinical)
 
-    print("\nGenerating Fig 4: Per-cancer forest plot...")
+    print("\nGenerating Fig 4: Cox regression forest plot...")
+    fig_cox_forest(survival_df)
+
+    print("\nGenerating Fig 5: Per-cancer forest plot...")
     fig_per_cancer_forest(survival_df)
 
     print("\nGenerating Fig 5: DepMap Nutlin-3a box plot...")
