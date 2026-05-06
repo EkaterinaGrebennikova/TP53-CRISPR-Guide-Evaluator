@@ -98,7 +98,8 @@ def main():
         agg = get_aggregation_risk(ev.aa_change)
         if agg['aggregates']:
             print(f"  [WARNING] Aggregation: {agg['note']}")
-        allele = get_allele_status(args.zygosity, 0.7)
+        editing_eff = g.get('ml_efficiency', 0.7) if g else 0.7
+        allele = get_allele_status(args.zygosity, editing_eff)
         print(f"\n  --- Allele Model ---")
         print(f"  Zygosity:                 {allele['zygosity']}")
         print(f"  Pre-correction WT:        {allele['pre_correction_wt_fraction']}  (tetramer: {allele['pre_correction_tetramer']})")

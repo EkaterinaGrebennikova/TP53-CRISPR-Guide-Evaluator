@@ -9,7 +9,9 @@ def get_combined_restoration(strategies, efficiency=0.7, zygosity='heterozygous'
 
     for s in strategies:
         name = f"{s['mutation'].ref_aa}{s['mutation'].aa_position}{s['mutation'].alt_aa}"
-        allele = get_allele_status(zygosity, efficiency)
+        g = s.get('best_guide')
+        eff = g.get('ml_efficiency', efficiency) if g else efficiency
+        allele = get_allele_status(zygosity, eff)
         structural_impact = s['evaluation'].structural_impact if s['evaluation'].structural_impact is not None else 0.5
 
         pre_score  = round(allele['pre_correction_tetramer']  * (1.0 - structural_impact), 3)
