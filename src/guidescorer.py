@@ -8,6 +8,28 @@ CAS9_EFFICIENCY = {
     'SpRY':    0.70
 }
 
+_ml_available = None
+
+def _get_ml_prediction(spacer, edit_position, modality):
+    """Try to get ML-predicted AA correction efficiency. Returns None on failure."""
+    global _ml_available
+    if _ml_available is False:
+        return None
+    if modality not in ('CBE', 'ABE'):
+        return None
+    try:
+        from efficiencypredictorml import predict_efficiency, CBE_MODEL, ABE_MODEL
+        import os
+        model_path = CBE_MODEL if modality == 'CBE' else ABE_MODEL
+        if not os.path.exists(model_path):
+            _ml_available = False
+            return None
+        _ml_available = True
+        return predict_efficiency(spacer, edit_position, modality=modality)
+    except Exception:
+        _ml_available = False
+        return None
+
 def score_gc(spacer):
     total=0
     for i in range(len(spacer)):
@@ -20,7 +42,7 @@ def score_gc(spacer):
         return max(0.0, 1.0 - (0.4 - total) * 5)
     else:
         return max(0.0, 1.0 - (total - 0.6) * 5)
-    
+
 def score_bystander(bystander_consequences:list):
     if len(bystander_consequences) == 0:
         return 1.0
@@ -32,7 +54,7 @@ def score_bystander(bystander_consequences:list):
             harms.append(1.0-b['dms_score'])
     avg_harm = sum(harms) / len(harms)
     count_penalty = min(len(bystander_consequences) * 0.05, 0.2)
-    return max(0.0, round(1.0 - avg_harm - count_penalty, 3))  
+    return max(0.0, round(1.0 - avg_harm - count_penalty, 3))
 
 def score_guide(guide, modality, nt_change=None, cds_sequence=None):
     if guide.get("spacer") is None:
@@ -44,9 +66,21 @@ def score_guide(guide, modality, nt_change=None, cds_sequence=None):
     if "target_pos_in_spacer" in guide and nt_change and cds_sequence:
         bystanders = get_bystander_consequence(guide, modality, nt_change, cds_sequence)
         bystander = score_bystander(bystanders)
-        return round((gc * 0.5 + bystander * 0.5) * efficiency, 3)
+        heuristic = (gc * 0.5 + bystander * 0.5) * efficiency
     else:
-        return round(gc * efficiency, 3)
+        heuristic = gc * efficiency
+
+    # Blend with ML prediction for CBE/ABE
+    ml_pred = None
+    if "target_pos_in_spacer" in guide:
+        ml_pred = _get_ml_prediction(spacer, guide["target_pos_in_spacer"], modality)
+    if ml_pred is not None:
+        final = heuristic * 0.5 + ml_pred * 0.5
+    else:
+        final = heuristic
+
+    guide['ml_efficiency'] = ml_pred
+    return round(final, 3)
 
 if __name__ == "__main__":
     import sys, os

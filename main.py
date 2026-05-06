@@ -145,7 +145,10 @@ def main():
         print(f"  Delivery:         {rec['primary']} ({rec['primary_eff']})")
         print(f"  Alt. delivery:    {rec['secondary']} ({rec['secondary_eff']})")
         print(f"  Cas9 variant:     {g.get('cas9_variant', 'N/A') if g else 'N/A'}")
-        print(f"  Guide score:      {s['score']}")
+        print(f"  Guide score:      {s['score']:.3f}")
+        ml_eff = g.get('ml_efficiency') if g else None
+        if ml_eff is not None:
+            print(f"  ML efficiency:    {ml_eff:.3f}")
         print(f"  Structural impact: {ev.structural_impact}")
         if g and g.get("spacer"):
             print(f"  Off-target safety: {score_offtarget(g['spacer'])}")
@@ -164,11 +167,12 @@ def main():
             print(f"  Threshold (Ventura 2007):    PASSES ({tetramer['fully_wt_fraction']} >= {tetramer['threshold']})")
         else:
             print(f"  Threshold (Ventura 2007):    [WARNING] FAILS ({tetramer['fully_wt_fraction']} < {tetramer['threshold']})")
-        window = get_therapeutic_window(0.7, ev.structural_impact)
+        current_eff = g.get('ml_efficiency', 0.7) if g else 0.7
+        window = get_therapeutic_window(current_eff, ev.structural_impact)
         print(f"\n  --- Therapeutic Window ---")
-        print(f"  Min efficiency needed:  {window['min_efficiency']}")
-        print(f"  Current efficiency:     {window['current_efficiency']}  (placeholder)")
-        print(f"  Effective restoration:  {window['effective_restoration']}")
+        print(f"  Min efficiency needed:  {window['min_efficiency']:.3f}")
+        print(f"  Current efficiency:     {window['current_efficiency']:.3f}{'  (ML-predicted)' if g and g.get('ml_efficiency') is not None else '  (default)'}")
+        print(f"  Effective restoration:  {window['effective_restoration']:.3f}")
         print(f"  Recommendation:         {window['recommendation']}")
         compounds = get_compound_synergy(
             ev.aa_change, agg['aggregates'],
@@ -227,7 +231,9 @@ def main():
         if args.show_all_guides:
             print(f"\n  --- All Candidate Guides ({len(s['all_guides'])}) ---")
             for ag in sorted(s['all_guides'], key=lambda x: x['score'], reverse=True):
-                print(f"  [{ag['score']}] {ag['modality']} | cas9: {ag['guide'].get('cas9_variant','?')} | {ag['guide'].get('spacer')}")
+                ml_val = ag['guide'].get('ml_efficiency')
+                ml_str = f" | ml: {ml_val:.3f}" if ml_val is not None else ""
+                print(f"  [{ag['score']}] {ag['modality']} | cas9: {ag['guide'].get('cas9_variant','?')} | {ag['guide'].get('spacer')}{ml_str}")
 
     if len(strategies) > 1:
         guide_set = optimize_guide_set(strategies)
