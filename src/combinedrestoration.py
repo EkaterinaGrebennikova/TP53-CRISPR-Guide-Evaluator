@@ -10,7 +10,8 @@ def get_combined_restoration(strategies, efficiency=0.7, zygosity='heterozygous'
     for s in strategies:
         name = f"{s['mutation'].ref_aa}{s['mutation'].aa_position}{s['mutation'].alt_aa}"
         g = s.get('best_guide')
-        eff = g.get('ml_efficiency', efficiency) if g else efficiency
+        ml = g.get('ml_efficiency') if g else None
+        eff = ml if ml is not None else efficiency
         allele = get_allele_status(zygosity, eff)
         structural_impact = s['evaluation'].structural_impact if s['evaluation'].structural_impact is not None else 0.5
 

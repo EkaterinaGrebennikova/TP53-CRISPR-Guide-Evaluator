@@ -98,7 +98,8 @@ def main():
         agg = get_aggregation_risk(ev.aa_change)
         if agg['aggregates']:
             print(f"  [WARNING] Aggregation: {agg['note']}")
-        editing_eff = g.get('ml_efficiency', 0.7) if g else 0.7
+        editing_eff = g.get('ml_efficiency') if g else None
+        editing_eff = editing_eff if editing_eff is not None else 0.7
         allele = get_allele_status(args.zygosity, editing_eff)
         print(f"\n  --- Allele Model ---")
         print(f"  Zygosity:                 {allele['zygosity']}")
@@ -168,7 +169,8 @@ def main():
             print(f"  Threshold (Ventura 2007):    PASSES ({tetramer['fully_wt_fraction']} >= {tetramer['threshold']})")
         else:
             print(f"  Threshold (Ventura 2007):    [WARNING] FAILS ({tetramer['fully_wt_fraction']} < {tetramer['threshold']})")
-        current_eff = g.get('ml_efficiency', 0.7) if g else 0.7
+        current_eff = g.get('ml_efficiency') if g else None
+        current_eff = current_eff if current_eff is not None else 0.7
         window = get_therapeutic_window(current_eff, ev.structural_impact)
         print(f"\n  --- Therapeutic Window ---")
         print(f"  Min efficiency needed:  {window['min_efficiency']:.3f}")
