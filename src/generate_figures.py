@@ -294,6 +294,79 @@ def fig_cox_forest(survival_df):
     print(f"  Saved {path}")
 
 
+def _preprocess_abe_legacy():
+    """ABE preprocessing matching the original 113-feature model (ABE only, no flanking/substrate extras)."""
+    from efficiencypredictorml import ABE_CSV, MIN_READ_COUNT, extract_features
+    df = pd.read_csv(ABE_CSV, low_memory=False)
+    rows = []
+    for ct in ('HEK293T', 'mES'):
+        target_col = f'Obs aa correction precision among edited reads_{ct}_ABE'
+        reads_col = f'Total obs read count_{ct}_ABE'
+        sub = df[['gRNA (20nt)', 'Editing position', target_col, reads_col]].copy()
+        sub = sub.rename(columns={target_col: 'target', reads_col: 'reads'})
+        sub['cell_type'] = ct
+        rows.append(sub)
+    combined = pd.concat(rows, ignore_index=True)
+    combined['reads'] = pd.to_numeric(combined['reads'], errors='coerce')
+    combined = combined.dropna(subset=['target', 'gRNA (20nt)'])
+    combined = combined[combined['reads'] >= MIN_READ_COUNT]
+    combined = combined[combined['gRNA (20nt)'].str.len() == 20]
+    X = np.array([
+        extract_features(row['gRNA (20nt)'], int(row['Editing position']), row['cell_type'])[:113]
+        for _, row in combined.iterrows()
+    ])
+    y = combined['target'].values.astype(float)
+    return X, y
+
+
+def fig_ml_predicted_vs_observed():
+    """Fig X: Predicted vs observed AA correction precision for ABE and CBE models."""
+    from efficiencypredictorml import (
+        _preprocess_cbe, CBE_MODEL, ABE_MODEL,
+    )
+    from sklearn.metrics import r2_score
+    from sklearn.model_selection import train_test_split
+    from scipy.stats import spearmanr
+    import pickle
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
+
+    for ax, modality, preprocess, model_path in [
+        (axes[0], 'ABE', _preprocess_abe_legacy, ABE_MODEL),
+        (axes[1], 'CBE', _preprocess_cbe, CBE_MODEL),
+    ]:
+        X, y = preprocess()
+        _, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
+
+        y_pred = np.clip(model.predict(X_test), 0.0, 1.0)
+        r2 = r2_score(y_test, y_pred)
+        rho, _ = spearmanr(y_test, y_pred)
+
+        ax.scatter(y_test, y_pred, alpha=0.3, s=12, color='#1976D2', edgecolors='none')
+        ax.plot([0, 1], [0, 1], '--', color='#D32F2F', linewidth=1.5, label='Perfect prediction')
+        ax.set_xlabel('Observed AA Correction Precision', fontsize=11)
+        ax.set_ylabel('Predicted AA Correction Precision', fontsize=11)
+        ax.set_title(f'{modality} Model (n={len(y_test)})', fontsize=13, fontweight='bold')
+        ax.set_xlim(-0.05, 1.05)
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_aspect('equal')
+
+        stats_text = f'$R^2$ = {r2:.3f}\nSpearman ρ = {rho:.3f}'
+        ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
+                verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        ax.legend(loc='lower right', fontsize=9)
+
+    plt.tight_layout()
+    path = os.path.join(FIGURES_DIR, 'ml_predicted_vs_observed.png')
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+    print(f"  Saved {path}")
+
+
 if __name__ == '__main__':
     print("Loading TCGA data...")
     mutations = load_mutations()
@@ -315,5 +388,8 @@ if __name__ == '__main__':
 
     print("\nGenerating Fig S2: MSK-IMPACT KM curve...")
     fig_msk_km()
+
+    print("\nGenerating Fig X: ML predicted vs observed...")
+    fig_ml_predicted_vs_observed()
 
     print("\nDone. All figures saved to figures/")

@@ -12,11 +12,10 @@ ABE_CSV = os.path.join(DATA_DIR, 'mmc3.csv')
 CBE_MODEL = os.path.join(DATA_DIR, 'be_model_cbe.pkl')
 ABE_MODEL = os.path.join(DATA_DIR, 'be_model_abe.pkl')
 
-# Target columns — observed amino acid correction precision
-CBE_TARGET_HEK = 'Obs aa correction precision among edited reads_HEK293T_BE4'
-CBE_TARGET_MES = 'Obs aa correction precision among edited reads_mES_BE4'
-ABE_TARGET_HEK = 'Obs aa correction precision among edited reads_HEK293T_ABE'
-ABE_TARGET_MES = 'Obs aa correction precision among edited reads_mES_ABE'
+# All CBE editors to train on (editor_suffix, has both mES and HEK293T)
+CBE_EDITORS = ['BE4', 'BE4-CP1028', 'AID', 'CDA', 'eA3A', 'evoAPOBEC']
+# All ABE editors to train on
+ABE_EDITORS = ['ABE', 'ABE-CP1040']
 
 # Minimum read count to trust observed efficiency
 MIN_READ_COUNT = 100
@@ -58,18 +57,30 @@ def _melting_temp(seq):
     return 2 * at + 4 * gc
 
 
-def extract_features(spacer, edit_position, cell_type='HEK293T'):
+def extract_features(spacer, edit_position, cell_type='HEK293T',
+                     seq_context=None, n_substrate_core=None,
+                     n_substrate_wide=None, pred_total_prob=None):
     """Build feature vector for a single guide.
 
-    Features (95 total):
+    Features (113 total):
       - One-hot encoded 20bp spacer          (80)
       - GC content                            (1)
       - Normalised edit position              (1)
       - Local trinucleotide context one-hot   (12)
       - Dinucleotide frequencies              (16)
       - Melting temperature (normalised)      (1)
-      - Number of substrate C/A in window 4-8 (1)
+      - Substrate C/A count in window 4-8     (1)
       - Cell type flag (0=mES, 1=HEK293T)    (1)
+    When available from training data:
+      - Flanking sequence features            (4)
+        - Left flank GC content               (1)
+        - Right flank GC content              (1)
+        - Left flank melting temp             (1)
+        - Right flank melting temp            (1)
+      - Substrate nts in core window (4-8)    (1)
+      - Substrate nts in wide window (1-12)   (1)
+      - Arbab predicted total probability     (1)
+    Total with extras: 117
     """
     spacer = spacer.upper()
     feat = []
@@ -100,13 +111,31 @@ def extract_features(spacer, edit_position, cell_type='HEK293T'):
     feat.append(_melting_temp(spacer) / 100.0)
 
     # Substrate nucleotides in editing window positions 4-8 (1)
-    window = spacer[3:8]  # 0-indexed positions 3-7 = protospacer 4-8
-    # For CBE: count C's; for ABE: count A's — caller doesn't know modality here
-    # so count both and let the model learn which matters
+    window = spacer[3:8]
     feat.append(sum(1 for s in window if s in 'CA') / len(window))
 
     # Cell type (1)
     feat.append(1.0 if cell_type == 'HEK293T' else 0.0)
+
+    # Flanking sequence features from 56nt context (4)
+    if seq_context and len(seq_context) >= 56:
+        ctx = seq_context.upper()
+        # Spacer sits at positions 10-29 in the 56nt context
+        left_flank = ctx[:10]
+        right_flank = ctx[30:56]
+        feat.append(sum(1 for s in left_flank if s in 'GC') / len(left_flank))
+        feat.append(sum(1 for s in right_flank if s in 'GC') / len(right_flank))
+        feat.append(_melting_temp(left_flank) / 100.0)
+        feat.append(_melting_temp(right_flank) / 100.0)
+    else:
+        feat.extend([gc, gc, _melting_temp(spacer) / 100.0, _melting_temp(spacer) / 100.0])
+
+    # Substrate counts from Arbab data (2)
+    feat.append(n_substrate_core / 5.0 if n_substrate_core is not None else 0.0)
+    feat.append(n_substrate_wide / 12.0 if n_substrate_wide is not None else 0.0)
+
+    # Arbab predicted total editing probability (1)
+    feat.append(pred_total_prob if pred_total_prob is not None else 0.0)
 
     return feat
 
@@ -115,82 +144,85 @@ def extract_features(spacer, edit_position, cell_type='HEK293T'):
 # Data preprocessing
 # ---------------------------------------------------------------------------
 
-def _preprocess_cbe():
-    """Load and clean CBE (BE4) training data from Koblan et al. mmc2.csv.
-
-    Combines HEK293T and mES observations, filters by read count,
-    returns (X feature matrix, y target array).
-    """
-    df = pd.read_csv(CBE_CSV, low_memory=False)
-
+def _collect_editor_rows(df, editors, cell_types=('HEK293T', 'mES')):
+    """Extract rows from all editors and cell types into a unified dataframe."""
     rows = []
-    # HEK293T BE4
-    hek = df[['gRNA (20nt)', 'Editing position',
-              CBE_TARGET_HEK, 'Total obs read count_HEK293T_BE4']].copy()
-    hek = hek.rename(columns={CBE_TARGET_HEK: 'target',
-                               'Total obs read count_HEK293T_BE4': 'reads'})
-    hek['cell_type'] = 'HEK293T'
-    rows.append(hek)
+    for editor in editors:
+        for ct in cell_types:
+            target_col = f'Obs aa correction precision among edited reads_{ct}_{editor}'
+            reads_col = f'Total obs read count_{ct}_{editor}'
+            core_col = f'Num. core substrate nts (4-8)_{ct}_{editor}'
+            wide_col = f'Num. core substrate nts (1-12)_{ct}_{editor}'
+            pred_col = f'Pred total probability_{ct}_{editor}'
 
-    # mES BE4
-    mes = df[['gRNA (20nt)', 'Editing position',
-              CBE_TARGET_MES, 'Total obs read count_mES_BE4']].copy()
-    mes = mes.rename(columns={CBE_TARGET_MES: 'target',
-                               'Total obs read count_mES_BE4': 'reads'})
-    mes['cell_type'] = 'mES'
-    rows.append(mes)
+            if target_col not in df.columns:
+                continue
+
+            cols = ['gRNA (20nt)', 'Editing position', 'Sequence context (56nt)',
+                    target_col, reads_col]
+            # Add optional columns if they exist
+            opt = {}
+            for name, col in [('core', core_col), ('wide', wide_col), ('pred', pred_col)]:
+                if col in df.columns:
+                    cols.append(col)
+                    opt[name] = col
+
+            sub = df[cols].copy()
+            sub = sub.rename(columns={target_col: 'target', reads_col: 'reads',
+                                      'Sequence context (56nt)': 'seq_context'})
+            if 'core' in opt:
+                sub = sub.rename(columns={opt['core']: 'n_substrate_core'})
+            if 'wide' in opt:
+                sub = sub.rename(columns={opt['wide']: 'n_substrate_wide'})
+            if 'pred' in opt:
+                sub = sub.rename(columns={opt['pred']: 'pred_total_prob'})
+            sub['cell_type'] = ct
+            rows.append(sub)
 
     combined = pd.concat(rows, ignore_index=True)
     combined['reads'] = pd.to_numeric(combined['reads'], errors='coerce')
     combined = combined.dropna(subset=['target', 'gRNA (20nt)'])
     combined = combined[combined['reads'] >= MIN_READ_COUNT]
     combined = combined[combined['gRNA (20nt)'].str.len() == 20]
+    return combined
 
+
+def _df_to_Xy(combined):
+    """Convert a preprocessed dataframe to feature matrix X and target array y."""
     X = np.array([
-        extract_features(row['gRNA (20nt)'], int(row['Editing position']), row['cell_type'])
+        extract_features(
+            row['gRNA (20nt)'], int(row['Editing position']), row['cell_type'],
+            seq_context=row.get('seq_context'),
+            n_substrate_core=pd.to_numeric(row.get('n_substrate_core'), errors='coerce'),
+            n_substrate_wide=pd.to_numeric(row.get('n_substrate_wide'), errors='coerce'),
+            pred_total_prob=pd.to_numeric(row.get('pred_total_prob'), errors='coerce'),
+        )
         for _, row in combined.iterrows()
     ])
     y = combined['target'].values.astype(float)
     return X, y
+
+
+def _preprocess_cbe():
+    """Load and clean CBE training data from Arbab et al. mmc2.csv.
+
+    Pulls all 6 CBE editors (BE4, BE4-CP1028, AID, CDA, eA3A, evoAPOBEC),
+    both cell types, filters by read count, returns (X, y).
+    """
+    df = pd.read_csv(CBE_CSV, low_memory=False)
+    combined = _collect_editor_rows(df, CBE_EDITORS)
+    return _df_to_Xy(combined)
 
 
 def _preprocess_abe():
-    """Load and clean ABE training data from Koblan et al. mmc3.csv.
+    """Load and clean ABE training data from Arbab et al. mmc3.csv.
 
-    Combines HEK293T and mES observations, filters by read count,
-    returns (X feature matrix, y target array).
+    Pulls ABE and ABE-CP1040, both cell types, filters by read count,
+    returns (X, y).
     """
     df = pd.read_csv(ABE_CSV, low_memory=False)
-
-    rows = []
-    # HEK293T ABE
-    hek = df[['gRNA (20nt)', 'Editing position',
-              ABE_TARGET_HEK, 'Total obs read count_HEK293T_ABE']].copy()
-    hek = hek.rename(columns={ABE_TARGET_HEK: 'target',
-                               'Total obs read count_HEK293T_ABE': 'reads'})
-    hek['cell_type'] = 'HEK293T'
-    rows.append(hek)
-
-    # mES ABE
-    mes = df[['gRNA (20nt)', 'Editing position',
-              ABE_TARGET_MES, 'Total obs read count_mES_ABE']].copy()
-    mes = mes.rename(columns={ABE_TARGET_MES: 'target',
-                               'Total obs read count_mES_ABE': 'reads'})
-    mes['cell_type'] = 'mES'
-    rows.append(mes)
-
-    combined = pd.concat(rows, ignore_index=True)
-    combined['reads'] = pd.to_numeric(combined['reads'], errors='coerce')
-    combined = combined.dropna(subset=['target', 'gRNA (20nt)'])
-    combined = combined[combined['reads'] >= MIN_READ_COUNT]
-    combined = combined[combined['gRNA (20nt)'].str.len() == 20]
-
-    X = np.array([
-        extract_features(row['gRNA (20nt)'], int(row['Editing position']), row['cell_type'])
-        for _, row in combined.iterrows()
-    ])
-    y = combined['target'].values.astype(float)
-    return X, y
+    combined = _collect_editor_rows(df, ABE_EDITORS)
+    return _df_to_Xy(combined)
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +409,10 @@ def predict_efficiency(spacer, edit_position, modality='CBE', cell_type='HEK293T
         float in [0, 1] — predicted AA correction precision
     """
     model = _load_model(modality)
-    features = np.array([extract_features(spacer, edit_position, cell_type)])
+    feat = extract_features(spacer, edit_position, cell_type)
+    # Truncate to match model's expected feature count (ABE legacy: 113)
+    n_expected = model.n_features_in_
+    features = np.array([feat[:n_expected]])
     pred = model.predict(features)[0]
     return float(np.clip(pred, 0.0, 1.0))
 
