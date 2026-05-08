@@ -101,11 +101,11 @@ def score_bystander(bystander_consequences:list):
     harms = []
     for b in bystander_consequences:
         if b['dms_score'] is None:
-            harms.append(0.3)
+            harms.append(0.611)  # median harm across all DMS-scored TP53 mutations
         else:
             harms.append(1.0-b['dms_score'])
     avg_harm = sum(harms) / len(harms)
-    count_penalty = min(len(bystander_consequences) * 0.05, 0.2)
+    count_penalty = min(len(bystander_consequences) * 0.006, 0.024)  # Arbab BE4 per-substrate precision drop
     return max(0.0, round(1.0 - avg_harm - count_penalty, 3))
 
 def score_guide(guide, modality, nt_change=None, cds_sequence=None):

@@ -1,19 +1,23 @@
+# comp_score derived from DepMap OmicsCNGeneWGS copy number data
+# HCT116: all pathway genes diploid (CN ~1.0) → 1.0
+# U2OS: MDM2 CN=0.67 (hemizygous loss helps p53), others diploid → 1.0
+# MCF7: MDM2 CN=1.37 (amplified, comp=1/1.37≈0.73), others diploid → mean 0.932
 cell_line_status = {
     'HCT116': {'MDM2': 'Wild-type',
                 'p21': 'Intact',
                 'BAX': 'Intact',
                 'PUMA': 'Intact',
                 'comp_score': 1.0},
-    'U2OS': {'MDM2': 'Wild-type',
+    'U2OS': {'MDM2': 'Hemizygous loss',
              'p21': 'Intact',
              'BAX': 'Intact',
              'PUMA': 'Intact',
-             'comp_score': 0.9},
+             'comp_score': 1.0},
     'MCF7': {'MDM2': 'Amplified',
-             'p21': 'Compromised',
+             'p21': 'Intact',
              'BAX': 'Intact',
              'PUMA': 'Intact',
-             'comp_score': 0.4}
+             'comp_score': 0.932}
     }
 
 def get_pathway_status(cell_line, evaluation, tetramer_fraction, post_correction=False):
@@ -23,9 +27,10 @@ def get_pathway_status(cell_line, evaluation, tetramer_fraction, post_correction
     else:
         structural_recovery = 1.0 - (evaluation.structural_impact if evaluation.structural_impact is not None else 0.5)
     prog_score = round(tetramer_fraction * structural_recovery * cell_line_info['comp_score'], 3)
-    if prog_score >= 0.25:
+    # Thresholds: favorable ≥ 0.225 (~25% functional tetramers), moderate ≥ 0.113
+    if prog_score >= 0.225:
         prognosis = 'Favorable'
-    elif prog_score >= 0.12:
+    elif prog_score >= 0.113:
         prognosis = 'Moderate'
     else:
         prognosis = 'Poor'

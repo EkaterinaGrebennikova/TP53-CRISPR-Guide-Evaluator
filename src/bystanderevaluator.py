@@ -38,9 +38,9 @@ def get_bystander_consequence(guide, modality, nt_change, cds_sequence):
                 dms_score = get_dms_score(aa_change)
                 if dms_score is None:
                     consequence = 'unknown'
-                elif dms_score > 0.75:
+                elif dms_score > 0.315:
                     consequence = 'benign'
-                elif dms_score > 0.25:
+                elif dms_score > 0.275:
                     consequence = 'partial loss'
                 else:
                     consequence = 'pathogenic'
@@ -70,9 +70,9 @@ def get_bystander_consequence(guide, modality, nt_change, cds_sequence):
                 dms_score = get_dms_score(aa_change)
                 if dms_score is None:
                     consequence = 'unknown'
-                elif dms_score > 0.75:
+                elif dms_score > 0.315:
                     consequence = 'benign'
-                elif dms_score > 0.25:
+                elif dms_score > 0.275:
                     consequence = 'partial loss'
                 else:
                     consequence = 'pathogenic'
