@@ -1,13 +1,15 @@
 # Domain penalties derived from IARC TP53 yeast transactivation assay data
 # Penalty = 1 - (mean % WT activity / 100) per domain per target gene
-# p21: WAF1nWT (n=1129 DBD, 344 TA1, 198 Tet)
+# p21: WAF1nWT (n=2021 DBD, 344 TA1, 198 Tet)
 # MDM2: MDM2nWT (same sample sizes)
 # BAX: BAXnWT (same sample sizes)
-# PUMA: PUMAnWT_Saos2 (n=155 DBD; insufficient TA1/Tet data, using BAX as proxy)
+# PUMA: PUMAnWT_Saos2 (n=287 DBD, sparse TA1/Tet); Saos2 DBD mean=127.6% WT is
+#   an assay artifact (14% coverage, biased subset). DBD penalty uses BAX as proxy
+#   since PUMA and BAX are both BH3-only pro-apoptotic p53 targets.
 domain_penalties = {
     'p21':  {'DNA-binding': 0.509, 'Transactivation 1': 0.000, 'Tetramerization': 0.186, 'default': 0.046},
     'MDM2': {'DNA-binding': 0.625, 'Transactivation 1': 0.060, 'Tetramerization': 0.000, 'default': 0.184},
-    'PUMA': {'DNA-binding': 0.000, 'Transactivation 1': 0.000, 'Tetramerization': 0.107, 'default': 0.081},
+    'PUMA': {'DNA-binding': 0.444, 'Transactivation 1': 0.000, 'Tetramerization': 0.107, 'default': 0.081},
     'BAX':  {'DNA-binding': 0.444, 'Transactivation 1': 0.012, 'Tetramerization': 0.107, 'default': 0.081},
 }
 
