@@ -12,7 +12,7 @@ The tool performs three main functions:
 
 2. **Pan-Cancer Survival and Drug Response Analysis** — Evaluates the survival impact of each allelic state across 10,000+ TCGA patients using Kaplan-Meier analysis and Cox proportional hazards regression stratified by cancer type. Validates findings in an independent MSK-IMPACT cohort and analyzes drug sensitivity (Nutlin-3a, Serdemetan, Tenovin-6) by allelic state using DepMap/GDSC data.
 
-3. **CRISPR Guide Design and Scoring** — For a given TP53 mutation, selects the optimal editing modality (CBE, ABE, prime editing, or HDR), designs guide RNAs with PAM-aware spacer selection across multiple Cas9 variants (SpCas9, SaCas9, Cas9-NG, SpRY), scores guides based on GC content, bystander damage (using DMS functional data), and off-target risk, and models expected p53 tetramer restoration using a binomial probability framework.
+3. **CRISPR Correction Pipeline** — For a given TP53 mutation, evaluates functional severity (DMS data + IARC regression fallback), selects the optimal editing modality (CBE, ABE, prime editing, or HDR), and designs guide RNAs across four Cas9 variants. Guides are scored using a blend of heuristic features (GC content, bystander damage, off-target risk) and ML-predicted editing efficiency (GradientBoosting trained on Arbab et al. 2020 data). Post-correction outcomes are modeled through transcriptional target restoration (IARC yeast assay-derived domain penalties), cell line pathway competency (DepMap copy number), and tetramer-based prognosis classification.
 
 ## Usage
 
