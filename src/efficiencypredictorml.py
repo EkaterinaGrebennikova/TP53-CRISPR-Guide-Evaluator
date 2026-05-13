@@ -57,12 +57,15 @@ def _melting_temp(seq):
     return 2 * at + 4 * gc
 
 
+CBE_EDITOR_ORDER = ['BE4', 'BE4-CP1028', 'AID', 'CDA', 'eA3A', 'evoAPOBEC']
+
+
 def extract_features(spacer, edit_position, cell_type='HEK293T',
                      seq_context=None, n_substrate_core=None,
-                     n_substrate_wide=None, pred_total_prob=None):
+                     n_substrate_wide=None, editor=None):
     """Build feature vector for a single guide.
 
-    Features (113 total):
+    Base features (113):
       - One-hot encoded 20bp spacer          (80)
       - GC content                            (1)
       - Normalised edit position              (1)
@@ -71,16 +74,14 @@ def extract_features(spacer, edit_position, cell_type='HEK293T',
       - Melting temperature (normalised)      (1)
       - Substrate C/A count in window 4-8     (1)
       - Cell type flag (0=mES, 1=HEK293T)    (1)
-    When available from training data:
-      - Flanking sequence features            (4)
-        - Left flank GC content               (1)
-        - Right flank GC content              (1)
-        - Left flank melting temp             (1)
-        - Right flank melting temp            (1)
+    Extended features (6):
+      - Flanking sequence GC + Tm             (4)
       - Substrate nts in core window (4-8)    (1)
       - Substrate nts in wide window (1-12)   (1)
-      - Arbab predicted total probability     (1)
-    Total with extras: 117
+    Editor identity (6):
+      - One-hot CBE editor                    (6)
+    CBE model: 125 features (113 + 6 extended + 6 editor).
+    ABE legacy: 113 features (base only, truncated at inference).
     """
     spacer = spacer.upper()
     feat = []
@@ -120,7 +121,6 @@ def extract_features(spacer, edit_position, cell_type='HEK293T',
     # Flanking sequence features from 56nt context (4)
     if seq_context and len(seq_context) >= 56:
         ctx = seq_context.upper()
-        # Spacer sits at positions 10-29 in the 56nt context
         left_flank = ctx[:10]
         right_flank = ctx[30:56]
         feat.append(sum(1 for s in left_flank if s in 'GC') / len(left_flank))
@@ -134,8 +134,11 @@ def extract_features(spacer, edit_position, cell_type='HEK293T',
     feat.append(n_substrate_core / 5.0 if n_substrate_core is not None else 0.0)
     feat.append(n_substrate_wide / 12.0 if n_substrate_wide is not None else 0.0)
 
-    # Arbab predicted total editing probability (1)
-    feat.append(pred_total_prob if pred_total_prob is not None else 0.0)
+    # Editor one-hot (6) — for CBE model; ignored by ABE (truncated to 113)
+    editor_oh = [0.0] * len(CBE_EDITOR_ORDER)
+    if editor and editor in CBE_EDITOR_ORDER:
+        editor_oh[CBE_EDITOR_ORDER.index(editor)] = 1.0
+    feat.extend(editor_oh)
 
     return feat
 
@@ -177,6 +180,7 @@ def _collect_editor_rows(df, editors, cell_types=('HEK293T', 'mES')):
             if 'pred' in opt:
                 sub = sub.rename(columns={opt['pred']: 'pred_total_prob'})
             sub['cell_type'] = ct
+            sub['editor'] = editor
             rows.append(sub)
 
     combined = pd.concat(rows, ignore_index=True)
@@ -187,18 +191,26 @@ def _collect_editor_rows(df, editors, cell_types=('HEK293T', 'mES')):
     return combined
 
 
-def _df_to_Xy(combined):
-    """Convert a preprocessed dataframe to feature matrix X and target array y."""
-    X = np.array([
-        extract_features(
+def _df_to_Xy(combined, n_features=None):
+    """Convert a preprocessed dataframe to feature matrix X and target array y.
+
+    Args:
+        combined: preprocessed DataFrame with gRNA, Editing position, cell_type, target.
+        n_features: if set, truncate each feature vector to this length.
+                    Use 125 for CBE (119 base + 6 editor one-hot).
+                    Use 113 for ABE legacy (base features only).
+    """
+    feats = []
+    for _, row in combined.iterrows():
+        f = extract_features(
             row['gRNA (20nt)'], int(row['Editing position']), row['cell_type'],
             seq_context=row.get('seq_context'),
             n_substrate_core=pd.to_numeric(row.get('n_substrate_core'), errors='coerce'),
             n_substrate_wide=pd.to_numeric(row.get('n_substrate_wide'), errors='coerce'),
-            pred_total_prob=pd.to_numeric(row.get('pred_total_prob'), errors='coerce'),
+            editor=row.get('editor'),
         )
-        for _, row in combined.iterrows()
-    ])
+        feats.append(f[:n_features] if n_features else f)
+    X = np.array(feats)
     y = combined['target'].values.astype(float)
     return X, y
 
@@ -208,10 +220,12 @@ def _preprocess_cbe():
 
     Pulls all 6 CBE editors (BE4, BE4-CP1028, AID, CDA, eA3A, evoAPOBEC),
     both cell types, filters by read count, returns (X, y).
+    Uses 125 features (119 sequence/context + 6 editor one-hot).
+    At inference, editor is set to BE4.
     """
     df = pd.read_csv(CBE_CSV, low_memory=False)
     combined = _collect_editor_rows(df, CBE_EDITORS)
-    return _df_to_Xy(combined)
+    return _df_to_Xy(combined, n_features=125)
 
 
 def _preprocess_abe():
@@ -409,8 +423,17 @@ def predict_efficiency(spacer, edit_position, modality='CBE', cell_type='HEK293T
         float in [0, 1] — predicted AA correction precision
     """
     model = _load_model(modality)
-    feat = extract_features(spacer, edit_position, cell_type)
-    # Truncate to match model's expected feature count (ABE legacy: 113)
+    # Compute substrate counts from the spacer (matching Arbab training data)
+    s = spacer.upper()
+    substrate_nt = 'C' if modality == 'CBE' else 'A'
+    n_core = sum(1 for c in s[3:8] if c == substrate_nt)
+    n_wide = sum(1 for c in s[0:12] if c == substrate_nt)
+    # CBE inference uses BE4 editor identity; ABE features get truncated to 113
+    editor = 'BE4' if modality == 'CBE' else None
+    feat = extract_features(spacer, edit_position, cell_type,
+                            n_substrate_core=n_core,
+                            n_substrate_wide=n_wide,
+                            editor=editor)
     n_expected = model.n_features_in_
     features = np.array([feat[:n_expected]])
     pred = model.predict(features)[0]
