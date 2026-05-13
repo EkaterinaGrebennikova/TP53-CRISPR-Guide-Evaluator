@@ -95,13 +95,24 @@ def score_gc(spacer):
     else:
         return max(0.0, 1.0 - (total - 0.6) * 5)
 
+def _parse_bystander_position(aa_change):
+    import re
+    m = re.match(r'[A-Z](\d+)[A-Z\*]', aa_change or '')
+    return int(m.group(1)) if m else None
+
 def score_bystander(bystander_consequences:list):
     if len(bystander_consequences) == 0:
         return 1.0
+    HARM_DBD = 0.679
+    HARM_NON_DBD = 0.517
     harms = []
     for b in bystander_consequences:
         if b['dms_score'] is None:
-            harms.append(0.611)  # median harm across all DMS-scored TP53 mutations
+            pos = _parse_bystander_position(b.get('aa_change'))
+            if pos is not None and 94 <= pos <= 292:
+                harms.append(HARM_DBD)
+            else:
+                harms.append(HARM_NON_DBD)
         else:
             harms.append(1.0-b['dms_score'])
     avg_harm = sum(harms) / len(harms)
