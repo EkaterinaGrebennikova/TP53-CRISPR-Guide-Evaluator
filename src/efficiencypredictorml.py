@@ -218,13 +218,17 @@ def _df_to_Xy(combined, n_features=None):
 def _preprocess_cbe():
     """Load and clean CBE training data from Arbab et al. mmc2.csv.
 
-    Pulls all 6 CBE editors (BE4, BE4-CP1028, AID, CDA, eA3A, evoAPOBEC),
-    both cell types, filters by read count, returns (X, y).
-    Uses 125 features (119 sequence/context + 6 editor one-hot).
-    At inference, editor is set to BE4.
+    Deployed model trains on BE4 ONLY -- matches what inference uses
+    (predict_efficiency passes editor='BE4' for CBE). Group-by-spacer CV
+    showed pooling the 5 other CBE editors HURTS the honest R^2 because
+    cross-editor heterogeneity outweighs the data-volume gain (pooled
+    CV R^2=0.454 vs BE4-only 0.508; retuned BE4-only 0.531). See
+    analysis/cbe_per_editor_eval.py and analysis/cbe_be4_hyperparam_tune.py.
+    Both cell types kept, filtered by read count. 125 features retained
+    (the 6-dim editor one-hot becomes a constant for BE4-only; harmless).
     """
     df = pd.read_csv(CBE_CSV, low_memory=False)
-    combined = _collect_editor_rows(df, CBE_EDITORS)
+    combined = _collect_editor_rows(df, ['BE4'])
     return _df_to_Xy(combined, n_features=125)
 
 
@@ -244,7 +248,7 @@ def _preprocess_abe():
 # ---------------------------------------------------------------------------
 
 def train_model(modality='CBE', n_estimators=200, max_depth=8, learning_rate=0.05,
-                subsample=0.8, random_state=42):
+                subsample=0.8, min_samples_leaf=1, random_state=42):
     """Train a GradientBoosting regressor for the given modality.
 
     Returns:
@@ -262,6 +266,7 @@ def train_model(modality='CBE', n_estimators=200, max_depth=8, learning_rate=0.0
         max_depth=max_depth,
         learning_rate=learning_rate,
         subsample=subsample,
+        min_samples_leaf=min_samples_leaf,
         random_state=random_state,
     )
 
@@ -367,6 +372,13 @@ def train_and_save_all(tune=False):
     Args:
         tune: if True, run hyperparameter tuning (slower but better accuracy).
     """
+    # Per-modality best params (CBE: from GroupKFold retune on BE4-only,
+    # analysis/cbe_be4_hyperparam_tune.py. ABE: train_model defaults.)
+    DEPLOY = {
+        'CBE': dict(n_estimators=200, max_depth=8, learning_rate=0.05,
+                    min_samples_leaf=10, subsample=0.8),
+        'ABE': dict(),
+    }
     for modality, path in [('CBE', CBE_MODEL), ('ABE', ABE_MODEL)]:
         print(f"\n{'='*50}")
         print(f"Training {modality} model{'  (with tuning)' if tune else ''}...")
@@ -377,7 +389,7 @@ def train_and_save_all(tune=False):
             print(f"  Best params:   {result['params']}")
             print(f"  Best CV R²:    {result['cv_r2']:.3f}")
         else:
-            result = train_model(modality=modality)
+            result = train_model(modality=modality, **DEPLOY[modality])
             print(f"  5-fold CV R²:  {result['cv_r2_mean']:.3f} +/- {result['cv_r2_std']:.3f}")
 
         print(f"  Train samples: {result['n_train']}")
