@@ -294,102 +294,166 @@ def fig_cox_forest(survival_df):
     print(f"  Saved {path}")
 
 
-def _preprocess_abe_legacy():
-    """ABE preprocessing matching the original 113-feature model (ABE only, no flanking/substrate extras)."""
-    from efficiencypredictorml import ABE_CSV, MIN_READ_COUNT, extract_features
-    df = pd.read_csv(ABE_CSV, low_memory=False)
-    rows = []
-    for ct in ('HEK293T', 'mES'):
-        target_col = f'Obs aa correction precision among edited reads_{ct}_ABE'
-        reads_col = f'Total obs read count_{ct}_ABE'
-        sub = df[['gRNA (20nt)', 'Editing position', target_col, reads_col]].copy()
-        sub = sub.rename(columns={target_col: 'target', reads_col: 'reads'})
-        sub['cell_type'] = ct
-        rows.append(sub)
-    combined = pd.concat(rows, ignore_index=True)
-    combined['reads'] = pd.to_numeric(combined['reads'], errors='coerce')
-    combined = combined.dropna(subset=['target', 'gRNA (20nt)'])
-    combined = combined[combined['reads'] >= MIN_READ_COUNT]
-    combined = combined[combined['gRNA (20nt)'].str.len() == 20]
-    X = np.array([
-        extract_features(row['gRNA (20nt)'], int(row['Editing position']), row['cell_type'])[:113]
-        for _, row in combined.iterrows()
-    ])
-    y = combined['target'].values.astype(float)
-    return X, y
-
-
 def fig_ml_predicted_vs_observed():
-    """Fig X: Predicted vs observed AA correction precision for ABE and CBE models."""
+    """Honest predicted-vs-observed scatter for the deployed ABE and CBE
+    models. Predictions are OUT-OF-FOLD from 5-fold GroupKFold by spacer
+    (same gRNA never crosses train/test) -- the leak-free measure of the
+    deployed model class's generalization. The reported R^2 and Spearman
+    match the headline metrics cited in the paper.
+
+    Deployed configurations (matches src/efficiencypredictorml.py):
+      CBE: BE4-only training, 125 features,
+           n_est=200, depth=8, lr=0.05, leaf=10, sub=0.8.
+      ABE: pooled ABE + ABE-CP1040, 113 features (legacy truncation),
+           n_est=200, depth=8, lr=0.05, sub=0.8.
+    """
     from efficiencypredictorml import (
-        _preprocess_cbe, CBE_MODEL, ABE_MODEL,
+        _collect_editor_rows, _df_to_Xy, CBE_CSV, ABE_CSV, MIN_READ_COUNT,
     )
+    from sklearn.ensemble import GradientBoostingRegressor
     from sklearn.metrics import r2_score
-    from sklearn.model_selection import train_test_split
+    from sklearn.model_selection import GroupKFold
     from scipy.stats import spearmanr
-    import pickle
+
+    def oof_predict(csv_path, editors, n_features, params):
+        df = pd.read_csv(csv_path, low_memory=False)
+        c = _collect_editor_rows(df, editors)
+        c = c[c['reads'] >= MIN_READ_COUNT].reset_index(drop=True)
+        X, y = _df_to_Xy(c, n_features=n_features)
+        groups = c['gRNA (20nt)'].to_numpy()
+        yhat = np.zeros_like(y)
+        for tr, te in GroupKFold(n_splits=5).split(X, y, groups):
+            m = GradientBoostingRegressor(random_state=42, **params)
+            m.fit(X[tr], y[tr])
+            yhat[te] = np.clip(m.predict(X[te]), 0.0, 1.0)
+        return y, yhat
+
+    configs = [
+        (0, 'ABE (pooled, deployed)',
+         ABE_CSV, ['ABE', 'ABE-CP1040'], 113,
+         dict(n_estimators=200, max_depth=8, learning_rate=0.05,
+              subsample=0.8)),
+        (1, 'CBE (BE4-only, deployed)',
+         CBE_CSV, ['BE4'], 125,
+         dict(n_estimators=200, max_depth=8, learning_rate=0.05,
+              min_samples_leaf=10, subsample=0.8)),
+    ]
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
+    for idx, label, csv_path, editors, n_features, params in configs:
+        ax = axes[idx]
+        y, yhat = oof_predict(csv_path, editors, n_features, params)
+        r2 = r2_score(y, yhat)
+        rho, _ = spearmanr(y, yhat)
 
-    for ax, modality, preprocess, model_path in [
-        (axes[0], 'ABE', _preprocess_abe_legacy, ABE_MODEL),
-        (axes[1], 'CBE', _preprocess_cbe, CBE_MODEL),
-    ]:
-        X, y = preprocess()
-        _, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-        with open(model_path, 'rb') as f:
-            model = pickle.load(f)
-
-        y_pred = np.clip(model.predict(X_test), 0.0, 1.0)
-        r2 = r2_score(y_test, y_pred)
-        rho, _ = spearmanr(y_test, y_pred)
-
-        ax.scatter(y_test, y_pred, alpha=0.3, s=12, color='#1976D2', edgecolors='none')
-        ax.plot([0, 1], [0, 1], '--', color='#D32F2F', linewidth=1.5, label='Perfect prediction')
-        ax.set_xlabel('Observed AA Correction Precision', fontsize=11)
-        ax.set_ylabel('Predicted AA Correction Precision', fontsize=11)
-        ax.set_title(f'{modality} Model (n={len(y_test)})', fontsize=13, fontweight='bold')
+        ax.scatter(y, yhat, alpha=0.25, s=10, color='#1976D2',
+                   edgecolors='none')
+        ax.plot([0, 1], [0, 1], '--', color='#D32F2F', linewidth=1.5,
+                label='Perfect prediction')
+        ax.set_xlabel('Observed AA correction precision', fontsize=11)
+        ax.set_ylabel('Predicted (out-of-fold)', fontsize=11)
+        ax.set_title(f'{label}\nn={len(y)}, 5-fold GroupKFold by spacer',
+                     fontsize=11, fontweight='bold')
         ax.set_xlim(-0.05, 1.05)
         ax.set_ylim(-0.05, 1.05)
         ax.set_aspect('equal')
-
-        stats_text = f'$R^2$ = {r2:.3f}\nSpearman ρ = {rho:.3f}'
-        ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
+        ax.text(0.05, 0.95,
+                f'$R^2$ = {r2:.3f}\nSpearman $\\rho$ = {rho:.3f}',
+                transform=ax.transAxes, fontsize=10,
                 verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.85))
         ax.legend(loc='lower right', fontsize=9)
+
+    fig.text(0.5, -0.01,
+             'Out-of-fold predictions: every point predicted by a model trained '
+             'on the other 4 folds, with same-spacer rows held together '
+             '(no train/test contamination via cross-editor or cross-cell-type '
+             'duplicate spacers).',
+             ha='center', fontsize=8.5, style='italic')
 
     plt.tight_layout()
     path = os.path.join(FIGURES_DIR, 'ml_predicted_vs_observed.png')
-    fig.savefig(path, dpi=200)
+    fig.savefig(path, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print(f"  Saved {path}")
 
 
-if __name__ == '__main__':
-    print("Loading TCGA data...")
-    mutations = load_mutations()
-    cna = load_cna()
-    clinical = load_clinical()
-    survival_df = build_survival_df(mutations, cna, clinical)
+def fig_rescuability():
+    """Two-panel: (A) the allelic-state efficiency cliff, robust across
+    assembly exponents; (B) modality x allelic-state rescuability
+    (best-guide-per-mutation deployed scenario)."""
+    from rescuability import (
+        efficiency_thresholds, collect_ml_efficiencies,
+        recurrent_missense_panel, rescuability_table, EXPONENTS,
+    )
 
-    print("\nGenerating Fig 1: Allelic state by cancer type...")
-    fig_allelic_bar_by_cancer(mutations, cna, clinical)
+    th = efficiency_thresholds()
+    panel = recurrent_missense_panel(top_n=150)
+    _, by_best = collect_ml_efficiencies(panel)
+    tbl = rescuability_table(by_best, th)
 
-    print("\nGenerating Fig 4: Cox regression forest plot...")
-    fig_cox_forest(survival_df)
+    fig, (axA, axB) = plt.subplots(1, 2, figsize=(13, 5.5))
 
-    print("\nGenerating Fig 5: Per-cancer forest plot...")
-    fig_per_cancer_forest(survival_df)
+    # --- Panel A: the efficiency cliff ---
+    x = np.arange(len(EXPONENTS))
+    w = 0.35
+    het = [th[n]['het_cn_neutral'] for n in EXPONENTS]
+    loh = [th[n]['loh_or_biallelic'] for n in EXPONENTS]
+    axA.bar(x - w / 2, het, w, label='Het CN-neutral', color='#2196F3',
+            edgecolor='black', linewidth=0.6)
+    axA.bar(x + w / 2, loh, w, label='LOH / biallelic', color='#F44336',
+            edgecolor='black', linewidth=0.6)
+    for i in range(len(EXPONENTS)):
+        axA.text(x[i] - w / 2, het[i] + 0.02, f'{het[i]:.2f}', ha='center',
+                 fontsize=9)
+        axA.text(x[i] + w / 2, loh[i] + 0.02, f'{loh[i]:.2f}', ha='center',
+                 fontsize=9)
+    axA.set_xticks(x)
+    axA.set_xticklabels([f'n = {n}' for n in EXPONENTS])
+    axA.set_xlabel('Tetramer assembly exponent', fontsize=11)
+    axA.set_ylabel('Editing efficiency required\nto reach 0.45 tetramer fraction',
+                   fontsize=11)
+    axA.set_ylim(0, 1.0)
+    axA.set_title('A. The allelic-state efficiency cliff',
+                  fontsize=12, fontweight='bold')
+    axA.legend(fontsize=9, loc='upper left')
 
-    print("\nGenerating Fig 5: DepMap Nutlin-3a box plot...")
-    fig_depmap_nutlin_box()
+    # --- Panel B: rescuability at n=4, robustness band from n=2,3 ---
+    mods = ['ABE', 'CBE']
+    states = [('Het\nCN-neutral', 'pct_clear_het'),
+              ('LOH /\nbiallelic', 'pct_clear_loh')]
+    groups = [f'{m}\n{s[0]}' for m in mods for s in states]
+    vals_n4, lo, hi = [], [], []
+    for m in mods:
+        for _, col in states:
+            sub = tbl[tbl['modality'] == m]
+            v4 = float(sub[sub['exponent'] == 4][col].iloc[0])
+            v_all = [float(sub[sub['exponent'] == n][col].iloc[0])
+                     for n in EXPONENTS]
+            vals_n4.append(v4)
+            lo.append(v4 - min(v_all))
+            hi.append(max(v_all) - v4)
+    colors = ['#4CAF50', '#F44336', '#4CAF50', '#F44336']
+    xb = np.arange(len(groups))
+    bars = axB.bar(xb, vals_n4, color=colors, edgecolor='black',
+                   linewidth=0.6, yerr=[lo, hi], capsize=5,
+                   error_kw={'elinewidth': 1.2})
+    for b, v in zip(bars, vals_n4):
+        axB.text(b.get_x() + b.get_width() / 2, v + 3, f'{v:.0f}%',
+                 ha='center', fontsize=10, fontweight='bold')
+    axB.set_xticks(xb)
+    axB.set_xticklabels(groups, fontsize=9.5)
+    axB.set_ylabel('% of recurrent missense mutations\nrescuable (best guide)',
+                   fontsize=11)
+    axB.set_ylim(0, 112)
+    axB.set_title('B. Rescuability by modality x allelic state',
+                  fontsize=12, fontweight='bold')
+    axB.text(0.5, 0.97, 'bars: n=4   error bars: n=2-4 range',
+             transform=axB.transAxes, ha='center', va='top', fontsize=8.5,
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.85))
 
-    print("\nGenerating Fig S2: MSK-IMPACT KM curve...")
-    fig_msk_km()
-
-    print("\nGenerating Fig X: ML predicted vs observed...")
-    fig_ml_predicted_vs_observed()
-
-    print("\nDone. All figures saved to figures/")
+    plt.tight_layout()
+    path = os.path.join(FIGURES_DIR, 'rescuability.png')
+    fig.savefig(path, dpi=200, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  Saved {path}")
