@@ -235,12 +235,15 @@ def _preprocess_cbe():
 def _preprocess_abe():
     """Load and clean ABE training data from Arbab et al. mmc3.csv.
 
-    Pulls ABE and ABE-CP1040, both cell types, filters by read count,
-    returns (X, y).
+    Deployed model trains on ABE ONLY (parallel to CBE -> BE4-only).
+    Group-by-spacer CV showed pooling ABE-CP1040 reduces honest R^2
+    (pooled CV R^2=0.643 vs ABE-only 0.723; retuned ABE-only 0.730).
+    See analysis/abe_honest_eval.py and analysis/abe_only_hyperparam_tune.py.
+    Both cell types kept; 113 legacy features (no editor one-hot).
     """
     df = pd.read_csv(ABE_CSV, low_memory=False)
-    combined = _collect_editor_rows(df, ABE_EDITORS)
-    return _df_to_Xy(combined)
+    combined = _collect_editor_rows(df, ['ABE'])
+    return _df_to_Xy(combined, n_features=113)
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +380,8 @@ def train_and_save_all(tune=False):
     DEPLOY = {
         'CBE': dict(n_estimators=200, max_depth=8, learning_rate=0.05,
                     min_samples_leaf=10, subsample=0.8),
-        'ABE': dict(),
+        'ABE': dict(n_estimators=400, max_depth=8, learning_rate=0.03,
+                    min_samples_leaf=10, subsample=0.8),
     }
     for modality, path in [('CBE', CBE_MODEL), ('ABE', ABE_MODEL)]:
         print(f"\n{'='*50}")

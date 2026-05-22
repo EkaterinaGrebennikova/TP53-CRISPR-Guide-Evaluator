@@ -304,8 +304,8 @@ def fig_ml_predicted_vs_observed():
     Deployed configurations (matches src/efficiencypredictorml.py):
       CBE: BE4-only training, 125 features,
            n_est=200, depth=8, lr=0.05, leaf=10, sub=0.8.
-      ABE: pooled ABE + ABE-CP1040, 113 features (legacy truncation),
-           n_est=200, depth=8, lr=0.05, sub=0.8.
+      ABE: ABE-only training, 113 features (legacy truncation),
+           n_est=400, depth=8, lr=0.03, leaf=10, sub=0.8.
     """
     from efficiencypredictorml import (
         _collect_editor_rows, _df_to_Xy, CBE_CSV, ABE_CSV, MIN_READ_COUNT,
@@ -329,10 +329,10 @@ def fig_ml_predicted_vs_observed():
         return y, yhat
 
     configs = [
-        (0, 'ABE (pooled, deployed)',
-         ABE_CSV, ['ABE', 'ABE-CP1040'], 113,
-         dict(n_estimators=200, max_depth=8, learning_rate=0.05,
-              subsample=0.8)),
+        (0, 'ABE (ABE-only, deployed)',
+         ABE_CSV, ['ABE'], 113,
+         dict(n_estimators=400, max_depth=8, learning_rate=0.03,
+              min_samples_leaf=10, subsample=0.8)),
         (1, 'CBE (BE4-only, deployed)',
          CBE_CSV, ['BE4'], 125,
          dict(n_estimators=200, max_depth=8, learning_rate=0.05,

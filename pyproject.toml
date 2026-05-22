@@ -9,5 +9,6 @@ requires-python = ">=3.9"
 dependencies = [
     "biopython>=1.81",
     "lifelines>=0.30.0",
+    "lightgbm>=4.6.0",
     "requests>=2.31.0",
 ]
