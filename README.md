@@ -1,20 +1,20 @@
 # TP53 CRISPR Guide Evaluator
 
-A computational framework that classifies TP53 allelic state and designs optimal CRISPR correction strategies for each patient context.
+A computational framework that classifies TP53 allelic state and recommends allelic-state-guided treatment strategies across the therapeutic armamentarium — with CRISPR correction guide design as one branch.
 
-> **Status:** Research in progress (2026). Please contact the author before citing or building on this work.
+> **Status:** Research in progress (2026). Manuscript draft V2 available in [`paper/`](paper/). Please contact the author before citing or building on this work.
 
 ## Overview
 
-TP53 is the most frequently mutated gene in human cancers (~50%), yet therapeutic options depend on the allelic context of the mutation — whether the patient retains a wild-type copy (heterozygous), has lost it (LOH), or carries multiple mutations (biallelic). This tool integrates allelic state classification with CRISPR guide design to enable mutation-specific precision correction of TP53.
+TP53 is the most frequently mutated gene in human cancers (~50%), yet therapeutic options depend on the allelic context of the mutation — whether the patient retains a wild-type copy (heterozygous), has lost it (LOH), or carries multiple mutations (biallelic). This tool integrates allelic state classification with cancer-type-adjusted drug-response analysis and therapeutic stratification to recommend context-appropriate treatment, with CRISPR correction guide design as one branch.
 
 The tool performs three main functions:
 
 1. **Allelic State Classification** — Classifies TP53 mutations into five allelic states (wildtype, heterozygous CN-neutral, heterozygous with gain, LOH with mutation, biallelic mutation) using copy number alteration data and purity-adjusted variant allele frequency.
 
-2. **Pan-Cancer Survival and Drug Response Analysis** — Evaluates the survival impact of each allelic state across 10,000+ TCGA patients using Kaplan-Meier analysis and Cox proportional hazards regression stratified by cancer type. Validates findings in an independent MSK-IMPACT cohort and analyzes drug sensitivity (Nutlin-3a, Serdemetan, Tenovin-6) by allelic state using DepMap/GDSC data.
+2. **Pan-Cancer Survival and Drug Response Analysis** — Evaluates the survival impact of each allelic state across 10,000+ TCGA patients using Kaplan-Meier analysis and Cox proportional hazards regression stratified by cancer type. Validates findings in an independent MSK-IMPACT cohort. Analyzes drug sensitivity across six therapeutic classes (MDM2 inhibitors, DNA-damaging chemotherapy, p53-independent anti-mitotics, synthetic-lethality agents, mutant-p53 reactivators, gene correction) using DepMap/GDSC cell-line data, with cancer-type-adjusted OLS regression and Benjamini-Hochberg correction applied within each mechanistic panel.
 
-3. **CRISPR Correction Pipeline** — For a given TP53 mutation, evaluates functional severity (DMS data + IARC regression fallback), selects the optimal editing modality (CBE, ABE, prime editing, or HDR), and designs guide RNAs across four Cas9 variants. Guides are scored using a blend of heuristic features (GC content, bystander damage, off-target risk) and ML-predicted editing efficiency via gradient-boosting regressors trained on the Arbab et al. (2020) library. Model performance is evaluated by **5-fold cross-validation grouped by spacer** (GroupKFold) to prevent leakage from spacers assayed across multiple base editors. CBE is deployed on BE4 only; ABE is deployed on the canonical ABE editor — both matching inference. Honest group-CV: ABE R² = 0.730, ρ = 0.854; CBE R² = 0.531, ρ = 0.747. Post-correction outcomes are modeled through transcriptional target restoration (IARC yeast assay-derived domain penalties), cell line pathway competency (DepMap copy number), and tetramer-based prognosis classification.
+3. **Allelic-State-Guided Treatment Recommendation** (primary output) — For a given mutation and allelic state, outputs a ranked therapeutic recommendation across the six classes above, grounded in the empirical survival and drug-response findings. Mutation-specific gates refine the reactivator branch (e.g. truncating → N/A; Y220C → rezatapopt). Each mutation is also evaluated for functional severity (DMS + IARC), IARC functional annotation, and a pre/post-correction tetramer-based functional restoration estimate. When CRISPR correction is selected as a branch, the tool selects the editing modality (CBE/ABE/PE/HDR), designs and scores guide RNAs across four Cas9 variants, and predicts correction efficiency via gradient-boosting regressors — group-by-spacer GroupKFold validation; CBE deployed on BE4 only (R² = 0.531, ρ = 0.747, RMSE σ = 0.193), ABE on the canonical ABE editor (R² = 0.730, ρ = 0.854, RMSE σ = 0.201). The full CRISPR guide-design report is opt-in (`--design-guides`); cell-line prognosis is opt-in (`--cell-line`).
 
 ## Installation
 
@@ -26,10 +26,66 @@ uv sync
 
 ## Usage
 
+The primary output is an allelic-state-guided treatment recommendation. Provide a mutation (`-m`) and an allelic state (`--allelic-state`: `het`, `het_gain`, `loh`, or `biallelic`).
+
 ```bash
-uv run python main.py -m R175H --cell-line HCT116 --zygosity heterozygous
-uv run python main.py -m R175H,R248W --cell-line U2OS --zygosity loh --cancer-type BRCA
-uv run python main.py --vcf patient.vcf --cell-line MCF7 --summary
+# Treatment recommendation (primary output)
+uv run python main.py -m R175H --allelic-state loh
+uv run python main.py -m R175H --allelic-state het --cancer-type BRCA
+
+# Optional: cell-line-specific prognosis
+uv run python main.py -m R175H --allelic-state loh --cell-line MCF7
+
+# Optional: full CRISPR guide-design report
+uv run python main.py -m Y220C --allelic-state loh --design-guides
+
+# Optional: pan-cancer TCGA therapy landscape
+uv run python main.py -m R175H --allelic-state loh --landscape
+
+# VCF input
+uv run python main.py --vcf patient.vcf --allelic-state biallelic
+```
+
+| Flag | Purpose |
+|------|---------|
+| `-m / --mutations` | mutation(s), comma-separated (e.g. `R175H,R248W`) |
+| `--vcf` | VCF file input (alternative to `-m`) |
+| `--allelic-state` | `het` / `het_gain` / `loh` / `biallelic` (primary driver) |
+| `--zygosity` | alias: `heterozygous` / `loh` / `homozygous` |
+| `--cell-line` | *optional* — adds cell-line prognosis (HCT116 / U2OS / MCF7) |
+| `--design-guides` | *optional* — show the full CRISPR guide-design report |
+| `--landscape` | *optional* — show the pan-cancer TCGA therapy landscape |
+| `--cancer-type` | cancer-type context label |
+| `--output` | save results (`.json` / `.tsv`) |
+
+## Repository Structure
+
+```
+TP53-CRISPR-Guide-Evaluator/
+├── main.py                          # CLI entry point (recommendation-first)
+├── src/                             # Core modules
+│   ├── treatmentrecommender.py      # Allelic-state-guided recommender
+│   ├── survivalanalysis.py          # KM, Cox regression, BH correction
+│   ├── depmapdrugresponse.py        # DepMap/GDSC drug response loader
+│   ├── modalityselector.py          # CRISPR modality selection
+│   ├── guidedesigner.py             # Spacer + PAM search
+│   ├── guidescorer.py               # Guide heuristic + ML scoring
+│   ├── efficiencypredictorml.py     # CBE/ABE gradient boosting models
+│   ├── allelemodel.py               # Tetramer fraction model
+│   └── ...
+├── analysis/                        # Pipeline scripts (paper figures)
+│   ├── gdsc_chemo_figure.py         # Fig 6 (chemo forest)
+│   ├── gdsc_targeted_figure.py      # Fig 7 (targeted forest)
+│   ├── fig_wtloss_correctability.py # Fig 9 (gene-correction ceiling)
+│   ├── fig_stratification_matrix.py # Fig 10 (synthesis matrix)
+│   └── ...
+├── data/                            # Local datasets (TCGA, IARC, etc.)
+├── data/depmap/                     # DepMap/GDSC (manual download, gitignored)
+├── figures/                         # Generated figures (PNG)
+└── paper/                           # Manuscript drafts + planning artifacts
+    ├── TP53 CRISPR Research Draft V2.txt
+    ├── restructure_plan.md
+    └── stratification_evidence_ledger.md
 ```
 
 ## Data Sources
@@ -63,7 +119,17 @@ data/depmap/
 └── GDSC1_fitted_dose_response_27Oct23.csv
 ```
 
-> **Note:** The GDSC filenames include a date stamp from the October 2023 release. If you download a newer release, rename the files to match the names above, or update the paths in `src/depmapdrugresponse.py`.
+> **Note:** The GDSC filenames include a date stamp from the October 2023 release. If you download a newer release, rename the files to match the names above, or update the paths in `src/depmapdrugresponse.py`. These external datasets are gitignored and must be downloaded by every user.
+
+## Manuscript
+
+The current manuscript draft and supporting planning artifacts live in [`paper/`](paper/):
+
+- **`TP53 CRISPR Research Draft V2.txt`** — current manuscript draft (post-restructure)
+- **`restructure_plan.md`** — section-by-section restructure plan with status tags
+- **`stratification_evidence_ledger.md`** — per-cell evidence tags for the §3.10 stratification matrix
+
+Figures referenced in the manuscript are in [`figures/`](figures/) and can be regenerated by running the corresponding script in [`analysis/`](analysis/).
 
 ## Citation
 
