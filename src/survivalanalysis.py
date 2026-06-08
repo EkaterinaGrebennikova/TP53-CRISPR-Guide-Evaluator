@@ -186,7 +186,6 @@ def sensitivity_analysis(survival_df):
         }
     return results
 
-
 def survival_by_cancer_type(survival_df, min_patients = 30):
     results = {}
     for cancer_type, group in survival_df.groupby('cancer_type'):
