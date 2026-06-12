@@ -32,8 +32,10 @@ STRATIFICATION = {
                                 'a p53-based recommendation'),
         'synthetic_lethality': ('no_stratification', 'null',
                                 'No allelic-state-specific effect after adjustment'),
-        'mutant_reactivator':  ('no_stratification', 'null',
-                                'PRIMA-1MET showed no allelic-state effect'),
+        'mutant_reactivator':  ('no_stratification', 'mechanistic',
+                                'Not tested as pooled LOH-vs-WT (mutation-class-'
+                                'specific reactivator; see §3.7); branch refined '
+                                'by mutation gate'),
         'gene_correction':     ('not_recommended', 'mechanistic',
                                 'WT already present; correction not required'),
     },
@@ -46,14 +48,17 @@ STRATIFICATION = {
         'synthetic_lethality': ('no_stratification', 'null',
                                 'No allelic-state-specific effect after '
                                 'cancer-type adjustment'),
-        'mutant_reactivator':  ('no_stratification', 'null',
-                                'PRIMA-1MET showed no allelic-state effect'),
+        'mutant_reactivator':  ('no_stratification', 'mechanistic',
+                                'Not tested as pooled LOH-vs-WT (mutation-class-'
+                                'specific reactivator; see §3.7); branch refined '
+                                'by mutation gate'),
         'gene_correction':     ('reduced', 'mechanistic',
                                 'Adjunct: correct amplified mutant copies'),
     },
     'loh_with_mutation': {
         'MDM2_inhibitor':      ('not_recommended', 'empirical',
-                                'No WT to stabilize; Nutlin-3a beta=+2.18, p=2e-11'),
+                                'No WT to stabilize; Nutlin-3a beta=+2.18, '
+                                'p=1.7e-10 (BH within targeted panel)'),
         'dna_damaging_chemo':  ('not_recommended', 'empirical',
                                 'LOH-resistant to 5 BH-significant DNA-damaging agents'),
         'antimitotic_chemo':   ('not_allelic_limited', 'empirical',
@@ -61,11 +66,14 @@ STRATIFICATION = {
                                 'not reduced by LOH, but not a p53-based pick'),
         'synthetic_lethality': ('no_stratification', 'null',
                                 'PARP/ATR/CHK1: no effect after cancer-type adjustment'),
-        'mutant_reactivator':  ('no_stratification', 'null',
-                                'PRIMA-1MET: no allelic-state effect after adjustment'),
+        'mutant_reactivator':  ('no_stratification', 'mechanistic',
+                                'Not tested as pooled LOH-vs-WT (mutation-class-'
+                                'specific reactivator; see §3.7); branch refined '
+                                'by mutation gate'),
         'gene_correction':     ('recommended', 'empirical',
-                                'Only restoration path; subject to modality ceiling '
-                                '(CBE-correctable LOH ~50% non-correctable)'),
+                                'Only restoration path; subject to modality-dependent '
+                                'ceiling (~17-19% Phi-debiased WT-loss-attributable '
+                                'non-correctability across base-editable LOH)'),
     },
     'biallelic_mutation': {
         'MDM2_inhibitor':      ('not_recommended', 'mechanistic', 'No WT'),
@@ -76,8 +84,10 @@ STRATIFICATION = {
         'synthetic_lethality': ('no_stratification', 'null',
                                 'No allelic-state-specific effect after '
                                 'cancer-type adjustment'),
-        'mutant_reactivator':  ('no_stratification', 'null',
-                                'PRIMA-1MET showed no allelic-state effect'),
+        'mutant_reactivator':  ('no_stratification', 'mechanistic',
+                                'Not tested as pooled LOH-vs-WT (mutation-class-'
+                                'specific reactivator; see §3.7); branch refined '
+                                'by mutation gate'),
         'gene_correction':     ('recommended', 'mechanistic',
                                 'Restoration path; multi-guide, technically hardest'),
     },
@@ -180,7 +190,8 @@ def recommend_treatments(allelic_state: str,
 # mutation-specific reactivators (the mutation-gate layer)
 _MUTATION_SPECIFIC_REACTIVATOR = {
     'Y220C': 'rezatapopt (PC14586) is Y220C-specific (binds the Y220C cryptic '
-             'pocket); no allelic-state efficacy signal in our data',
+             'pocket); reactivator class not tested as pooled LOH-vs-WT in our '
+             'data (§3.7)',
 }
 
 
@@ -210,13 +221,13 @@ def _refine_for_mutation(recs, mutation_eval) -> None:
             r.evidence = 'literature'
         elif getattr(mutation_eval, 'is_contact_residue', False):
             r.rationale = ('DNA-contact mutant; less responsive to '
-                           'conformational reactivators (APR-246); no '
-                           'allelic-state efficacy signal')
+                           'conformational reactivators (APR-246); reactivator '
+                           'class not tested as pooled LOH-vs-WT (§3.7)')
             r.evidence = 'mechanistic'
         elif getattr(mutation_eval, 'in_dbd', False):
             r.rationale = ('structural/destabilizing DBD mutant; APR-246/'
-                           'eprenetapopt mechanistically applicable, but no '
-                           'allelic-state efficacy signal in our data')
+                           'eprenetapopt mechanistically applicable; reactivator '
+                           'class not tested as pooled LOH-vs-WT (§3.7)')
             r.evidence = 'mechanistic'
 
 

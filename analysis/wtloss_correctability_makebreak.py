@@ -17,8 +17,9 @@ modality held-out residual SD applied symmetrically.
 
 PRE-REGISTERED KILL CRITERION:
   If the WT-loss-attributable fraction among LOH base-editable patients
-  is < 10% at the standard exponent (k=4), OR collapses toward 0 under
-  Phi-uncertainty propagation, the bridge is dead. No build.
+  falls below 10% at the standard exponent (k=4) under EITHER the hard
+  count OR the Phi-debiased estimate (the figure-reported kill line),
+  the bridge is dead. No build.
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -164,7 +165,7 @@ def main():
     print("\n--- PRE-REGISTERED VERDICT (standard exponent k=4) ---")
     print(f"  WT-loss-attributable fraction (hard):        {ib4:.1f}%")
     print(f"  WT-loss-attributable fraction (Phi-debiased): {phi4:.1f}%")
-    kill = (ib4 < 10.0) or (phi4 < 5.0)
+    kill = (ib4 < 10.0) or (phi4 < 10.0)
     if kill:
         print("  VERDICT: KILL. Band unpopulated / collapses under "
               "uncertainty. Allelic state is decision-irrelevant given "
