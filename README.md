@@ -73,19 +73,15 @@ TP53-CRISPR-Guide-Evaluator/
 │   ├── efficiencypredictorml.py     # CBE/ABE gradient boosting models
 │   ├── allelemodel.py               # Tetramer fraction model
 │   └── ...
-├── analysis/                        # Pipeline scripts (paper figures)
-│   ├── gdsc_chemo_figure.py         # Fig 6 (chemo forest)
-│   ├── gdsc_targeted_figure.py      # Fig 7 (targeted forest)
-│   ├── fig_wtloss_correctability.py # Fig 9 (gene-correction ceiling)
-│   ├── fig_stratification_matrix.py # Fig 10 (synthesis matrix)
+├── analysis/                        # Pipeline / analysis scripts
+│   ├── gdsc_chemo_figure.py         # Chemo LOH-resistance forest plot
+│   ├── gdsc_targeted_figure.py      # Targeted-class forest plot (MDM2i + synth-leth)
+│   ├── fig_wtloss_correctability.py # Gene-correction ceiling figure
+│   ├── fig_stratification_matrix.py # Stratification matrix figure
 │   └── ...
 ├── data/                            # Local datasets (TCGA, IARC, etc.)
 ├── data/depmap/                     # DepMap/GDSC (manual download, gitignored)
-├── figures/                         # Generated figures (PNG)
-└── paper/                           # Manuscript drafts + planning artifacts
-    ├── TP53 CRISPR Research Draft V2.txt
-    ├── restructure_plan.md
-    └── stratification_evidence_ledger.md
+└── figures/                         # Generated figures (PNG)
 ```
 
 ## Data Sources

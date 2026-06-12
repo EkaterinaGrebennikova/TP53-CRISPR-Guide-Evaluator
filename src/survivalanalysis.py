@@ -8,16 +8,14 @@ import os
 
 
 def benjamini_hochberg(p_values):
-    """Apply BH correction to a list of p-values. Returns adjusted p-values."""
+    """Apply BH correction to a list of p-values. Returns adjusted p-values
+    in the same order as the input.
+    """
     p = np.array(p_values)
     n = len(p)
-    ranked = np.argsort(p)
-    adjusted = np.zeros(n)
-    for i in range(n):
-        adjusted[ranked[i]] = p[ranked[i]] * n / (np.where(ranked == ranked[i])[0][0] + 1)
-    # Enforce monotonicity (step-up)
     sorted_idx = np.argsort(p)
-    sorted_adj = p[sorted_idx] * n / (np.arange(1, n + 1))
+    sorted_adj = p[sorted_idx] * n / np.arange(1, n + 1)
+    # Enforce step-up monotonicity, then clip to [0, 1]
     for i in range(n - 2, -1, -1):
         sorted_adj[i] = min(sorted_adj[i], sorted_adj[i + 1])
     sorted_adj = np.minimum(sorted_adj, 1.0)
