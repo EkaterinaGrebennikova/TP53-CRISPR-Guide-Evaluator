@@ -1,6 +1,8 @@
 # src/fetchtcgamutations.py
-# One-time data retrieval utility: pulls TP53 mutations and TP53/MDM2 CNA data
-# for all 32 TCGA PanCancer Atlas studies via the cBioPortal REST API.
+# One-time data retrieval utility: pulls TP53 mutations, TP53/MDM2 CNA, and
+# patient clinical data for all 32 TCGA PanCancer Atlas studies via the
+# cBioPortal REST API. Regenerates the three gitignored inputs that
+# src/tcgaloader.py reads.
 # Usage: python src/fetchtcgamutations.py
 
 import os
@@ -16,6 +18,22 @@ MDM2_ENTREZ = 4193
 
 MUTATIONS_OUT = os.path.join(DATA_DIR, 'tcga_mutations.txt')
 CNA_OUT       = os.path.join(DATA_DIR, 'tcga_cna.txt')
+CLINICAL_OUT  = os.path.join(DATA_DIR, 'tcga_clinical.txt')
+
+# cBioPortal clinical attribute id -> the column header src/tcgaloader.py expects.
+# All seven are PATIENT-level attributes in the pan_can_atlas_2018 studies;
+# the header strings are cBioPortal's own display names, so the file this
+# writes is drop-in compatible with a manual portal export.
+CLINICAL_ATTRIBUTES = {
+    'AGE':                 'Diagnosis Age',
+    'SEX':                 'Sex',
+    'OS_STATUS':           'Overall Survival Status',
+    'OS_MONTHS':           'Overall Survival (Months)',
+    'DFS_STATUS':          'Disease Free Status',
+    'DFS_MONTHS':          'Disease Free (Months)',
+    'CANCER_TYPE_ACRONYM': 'TCGA PanCanAtlas Cancer Type Acronym',
+}
+CLINICAL_COLUMNS = ['Patient ID'] + list(CLINICAL_ATTRIBUTES.values())
 
 
 def get_pancancer_studies():
@@ -101,6 +119,53 @@ def fetch_cna(study_ids, entrez_ids):
     return pd.DataFrame(rows)
 
 
+def fetch_clinical(study_ids):
+    """Pull patient-level clinical data and pivot to one row per patient.
+
+    The endpoint returns long-format records (one row per patient x attribute),
+    so each study is pivoted to wide format and only the attributes in
+    CLINICAL_ATTRIBUTES are kept. Patients missing an attribute get NA, which
+    load_clinical() coerces via pd.to_numeric(errors='coerce').
+    """
+    rows = []
+    for sid in study_ids:
+        url = f"{API}/studies/{sid}/clinical-data"
+        by_patient = {}
+        page = 0
+        while True:
+            params = {'clinicalDataType': 'PATIENT',
+                      'pageSize': 10000, 'pageNumber': page}
+            try:
+                r = requests.get(url, params=params, timeout=120)
+            except requests.RequestException as e:
+                print(f"  {sid}: error {e}")
+                break
+            if r.status_code != 200:
+                print(f"  {sid}: HTTP {r.status_code} (no clinical data?)")
+                break
+            batch = r.json()
+            if not batch:
+                break
+            for d in batch:
+                attr = d.get('clinicalAttributeId')
+                if attr not in CLINICAL_ATTRIBUTES:
+                    continue
+                pid = d.get('patientId')
+                by_patient.setdefault(pid, {'Patient ID': pid})
+                by_patient[pid][CLINICAL_ATTRIBUTES[attr]] = d.get('value')
+            page += 1
+        rows.extend(by_patient.values())
+        print(f"  {sid}: {len(by_patient)} patients")
+        time.sleep(0.1)
+
+    df = pd.DataFrame(rows)
+    # Guarantee every expected column exists even if a study omitted one
+    for col in CLINICAL_COLUMNS:
+        if col not in df.columns:
+            df[col] = pd.NA
+    return df[CLINICAL_COLUMNS]
+
+
 if __name__ == "__main__":
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -118,4 +183,10 @@ if __name__ == "__main__":
     cna_df = fetch_cna(studies, [TP53_ENTREZ, MDM2_ENTREZ])
     print(f"\nTotal CNA records: {len(cna_df)}")
     cna_df.to_csv(CNA_OUT, sep='\t', index=False)
-    print(f"Saved to {CNA_OUT}")
+    print(f"Saved to {CNA_OUT}\n")
+
+    print("Fetching patient clinical data...")
+    clin_df = fetch_clinical(studies)
+    print(f"\nTotal patients: {len(clin_df)}")
+    clin_df.to_csv(CLINICAL_OUT, sep='\t', index=False, na_rep='NA')
+    print(f"Saved to {CLINICAL_OUT}")

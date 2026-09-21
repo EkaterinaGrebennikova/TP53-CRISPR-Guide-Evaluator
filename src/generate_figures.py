@@ -98,8 +98,87 @@ def fig_allelic_bar_by_cancer(mutations_df, cna_df, clinical_df, min_patients=20
     print(f"  Saved {path}")
 
 
+def fig_km_mut_vs_wt(survival_df):
+    """Fig 2: KM overall survival, TP53-mutant vs wild-type (TCGA)."""
+    from survivalanalysis import km_tp53_mut_vs_wt
+
+    res = km_tp53_mut_vs_wt(survival_df)
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    res['km_wt'].plot_survival_function(ax=ax, color='#1F77B4', linewidth=2,
+                                        ci_alpha=0.15)
+    res['km_mut'].plot_survival_function(ax=ax, color='#D62728', linewidth=2,
+                                         ci_alpha=0.15)
+
+    ax.axhline(0.5, color='grey', linestyle=':', linewidth=1, zorder=0)
+    ax.set_xlim(0, 300)
+    ax.set_ylim(0, 1.02)
+    ax.set_xlabel('Months from diagnosis', fontsize=11)
+    ax.set_ylabel('Overall survival probability', fontsize=11)
+    ax.set_title(f'TP53 Status and Overall Survival '
+                 f'(TCGA Pan-Cancer, n={len(survival_df):,})',
+                 fontsize=13, fontweight='bold')
+    ax.grid(alpha=0.25, linewidth=0.6)
+    ax.legend(fontsize=11, loc='upper right')
+
+    stats_text = (f"log-rank p = {res['logrank_p']:.2e}\n"
+                  f"median OS: mut={res['median_os_mut']:.0f}mo, "
+                  f"wt={res['median_os_wt']:.0f}mo")
+    ax.text(0.02, 0.03, stats_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='bottom', horizontalalignment='left',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.85,
+                      edgecolor='#666'))
+
+    plt.tight_layout()
+    path = os.path.join(FIGURES_DIR, 'km_tp53_mut_vs_wt.png')
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+    print(f"  Saved {path}")
+
+
+def fig_km_by_allelic_state(survival_df):
+    """Fig 3: KM overall survival by TP53 allelic state (unknowns excluded)."""
+    from survivalanalysis import km_by_allelic_state
+
+    res = km_by_allelic_state(survival_df)
+
+    # wildtype first, then the four mutant states in severity order
+    plot_order = [
+        ('wildtype',                'TP53 wildtype'),
+        ('heterozygous_cn_neutral', 'Heterozygous (CN-neutral)'),
+        ('heterozygous_with_gain',  'Heterozygous + gain'),
+        ('loh_with_mutation',       'LOH with mutation'),
+        ('biallelic_mutation',      'Biallelic mutation'),
+    ]
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+    total = 0
+    for state, label in plot_order:
+        if state not in res:
+            continue
+        entry = res[state]
+        total += entry['n']
+        entry['km'].plot_survival_function(
+            ax=ax, color=STATE_COLORS[state], linewidth=2, ci_alpha=0.15,
+            label=f"{label} (n={entry['n']})")
+
+    ax.axhline(0.5, color='grey', linestyle=':', linewidth=1, zorder=0)
+    ax.set_ylim(0, 1.02)
+    ax.set_xlabel('Months from diagnosis', fontsize=11)
+    ax.set_ylabel('Overall survival probability', fontsize=11)
+    ax.set_title('TP53 Allelic State and Overall Survival (TCGA Pan-Cancer)',
+                 fontsize=13, fontweight='bold')
+    ax.legend(fontsize=10, loc='upper right')
+
+    plt.tight_layout()
+    path = os.path.join(FIGURES_DIR, 'km_by_allelic_state.png')
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+    print(f"  Saved {path}  (n={total}, unknowns excluded)")
+
+
 def fig_per_cancer_forest(survival_df, min_patients=30):
-    """Fig 4: Forest plot — HR of TP53-mut vs WT per cancer type."""
+    """Fig 5: Forest plot — HR of TP53-mut vs WT per cancer type."""
     records = []
     for cancer_type, group in survival_df.groupby('cancer_type'):
         mut = group[group['tp53_mut']]
@@ -159,7 +238,11 @@ def fig_per_cancer_forest(survival_df, min_patients=30):
 
 
 def fig_depmap_nutlin_box():
-    """Fig 5: Box plot — ln(IC50) for Nutlin-3a by allelic state."""
+    """Box plot — ln(IC50) for Nutlin-3a by allelic state.
+
+    Not used in the current draft (Fig 7 reports the lineage-adjusted forest
+    plot instead, from analysis/gdsc_targeted_figure.py). Kept as a diagnostic.
+    """
     muts = load_tp53_mutations()
     cna = load_tp53_cna()
     drugs = load_drug_response()
@@ -193,7 +276,7 @@ def fig_depmap_nutlin_box():
 
 
 def fig_msk_km():
-    """Fig S2: KM curve — TP53-mut vs WT in MSK-IMPACT."""
+    """Fig S1: KM curve — TP53-mut vs WT in MSK-IMPACT."""
     m = load_msk_mutations()
     c = load_msk_cna()
     cl = load_msk_clinical()
@@ -457,3 +540,89 @@ def fig_rescuability():
     fig.savefig(path, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print(f"  Saved {path}")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+# name -> (paper label, needs_survival_df, function)
+# Figs 6, 7, 9 and 10 are produced by the analysis/ scripts instead:
+#   Fig 6  analysis/gdsc_chemo_figure.py
+#   Fig 7  analysis/gdsc_targeted_figure.py
+#   Fig 9  analysis/fig_wtloss_correctability.py
+#   Fig 10 analysis/fig_stratification_matrix.py
+FIGURES = {
+    'allelic_bar':   ('Fig 1',  False, None),   # takes raw frames, special-cased
+    'km_mut_wt':     ('Fig 2',  True,  fig_km_mut_vs_wt),
+    'km_allelic':    ('Fig 3',  True,  fig_km_by_allelic_state),
+    'cox_forest':    ('Fig 4',  True,  fig_cox_forest),
+    'cancer_forest': ('Fig 5',  True,  fig_per_cancer_forest),
+    'ml_scatter':    ('Fig 8',  False, fig_ml_predicted_vs_observed),
+    'msk_km':        ('Fig S1', False, fig_msk_km),
+    'nutlin_box':    ('unused', False, fig_depmap_nutlin_box),
+    'rescuability':  ('unused', False, fig_rescuability),
+}
+
+DEFAULT_FIGURES = ['allelic_bar', 'km_mut_wt', 'km_allelic', 'cox_forest',
+                   'cancer_forest', 'ml_scatter', 'msk_km']
+
+
+def main(names=None):
+    """Regenerate the paper figures owned by this module.
+
+    Each figure is run in isolation so one failure (e.g. a missing optional
+    dataset) does not abort the rest. Returns the number of failures.
+    """
+    names = names or DEFAULT_FIGURES
+    unknown = [n for n in names if n not in FIGURES]
+    if unknown:
+        raise SystemExit(f"Unknown figure(s): {unknown}\n"
+                         f"Available: {', '.join(FIGURES)}")
+
+    # TCGA frames are shared by Figs 1-5; load once, and only if needed.
+    needs_tcga = any(n == 'allelic_bar' or FIGURES[n][1] for n in names)
+    muts = cna = clin = survival_df = None
+    if needs_tcga:
+        print("Loading TCGA data...")
+        muts, cna, clin = load_mutations(), load_cna(), load_clinical()
+        if any(FIGURES[n][1] for n in names):
+            survival_df = build_survival_df(muts, cna, clin)
+            print(f"  survival cohort: {len(survival_df)} patients")
+
+    failures = 0
+    for name in names:
+        label, needs_survival, fn = FIGURES[name]
+        print(f"\n[{label}] {name}")
+        try:
+            if name == 'allelic_bar':
+                fig_allelic_bar_by_cancer(muts, cna, clin)
+            elif needs_survival:
+                fn(survival_df)
+            else:
+                fn()
+        except Exception as e:
+            failures += 1
+            print(f"  FAILED: {type(e).__name__}: {e}")
+
+    print(f"\nDone: {len(names) - failures}/{len(names)} figures written "
+          f"to {os.path.normpath(FIGURES_DIR)}")
+    if failures:
+        print("Note: Figs 6, 7, 9, 10 come from the analysis/ scripts "
+              "(see FIGURES comment).")
+    return failures
+
+
+if __name__ == '__main__':
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        description="Regenerate TP53 paper figures (Figs 1-5, 8, S1).")
+    ap.add_argument('--only', nargs='+', metavar='NAME', default=None,
+                    help=f"subset to build: {', '.join(FIGURES)}")
+    ap.add_argument('--all', action='store_true',
+                    help="include the two figures not used in the paper")
+    args = ap.parse_args()
+
+    selected = args.only or (list(FIGURES) if args.all else DEFAULT_FIGURES)
+    raise SystemExit(1 if main(selected) else 0)
